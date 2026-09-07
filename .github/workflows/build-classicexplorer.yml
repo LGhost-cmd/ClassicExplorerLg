@@ -4,66 +4,41 @@ on:
   workflow_dispatch:
   push:
     branches: [ master ]
-    paths:
-      - '**.cpp'
-      - '**.h'
-      - '**.c'
-      - '**.rc'
-      - '**.rgs'
-      - '**.idl'
-      - '**.vcxproj'
-      - '**.sln'
-      - '.github/workflows/build-classicexplorer.yml'
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Visual C++ ATL
-        shell: powershell
-        run: |
-          $installerDir = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
-          $vswhere = Join-Path $installerDir 'vswhere.exe'
-          $setup = Join-Path $installerDir 'setup.exe'
-
-          $vsPath = & $vswhere -latest -products * -property installationPath
-
-          if (-not $vsPath) {
-            throw 'Visual Studio installation was not found.'
-          }
-
-          Write-Host "Visual Studio: $vsPath"
-
-          $args = @(
-            'modify',
-            '--installPath', $vsPath,
-            '--add', 'Microsoft.VisualStudio.Component.VC.ATL',
-            '--quiet',
-            '--norestart'
-          )
-
-          $p = Start-Process `
-            -FilePath $setup `
-            -ArgumentList $args `
-            -Wait `
-            -PassThru
-
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) {
-            throw "Visual Studio Installer failed with exit code $($p.ExitCode)."
-          }
-
-      - name: Setup MSBuild
+      - name: Setup Visual Studio 2022 MSBuild
         uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+
+      - name: Show MSBuild version
+        shell: cmd
+        run: msbuild -version
 
       - name: Verify ATL
         shell: powershell
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vswhere -latest -products * -property installationPath
+
+          $vsPath = & $vswhere `
+            -latest `
+            -version "[17.0,18.0)" `
+            -products * `
+            -property installationPath
+
+          if (-not $vsPath) {
+            throw "Visual Studio 2022 not found."
+          }
+
+          Write-Host "Visual Studio 2022:"
+          Write-Host $vsPath
 
           $atl = Get-ChildItem `
             -Path "$vsPath\VC\Tools\MSVC" `
@@ -73,34 +48,55 @@ jobs:
             Select-Object -First 1
 
           if (-not $atl) {
-            throw 'atlbase.h is still missing after ATL installation.'
+            throw "ATL header atlbase.h not found."
           }
 
-          Write-Host "Found ATL:"
+          Write-Host "ATL found:"
           Write-Host $atl.FullName
 
-      - name: Build Release x64
+      - name: Build ClassicExplorer Release x64
         shell: cmd
-        run: msbuild ClassicExplorer.sln /m /p:Configuration=Release /p:Platform=x64 /p:RestorePackages=false
+        run: >
+          msbuild ClassicExplorer.sln
+          /m
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:PlatformToolset=v143
+          /p:RestorePackages=false
 
-      - name: Find built DLL
+      - name: Collect DLL
         shell: powershell
         run: |
-          $dlls = Get-ChildItem -Path . -Recurse -Filter ClassicExplorer.dll |
-            Where-Object { $_.FullName -notmatch '\\obj\\' }
+          Write-Host "Searching for ClassicExplorer.dll..."
+
+          $dlls = Get-ChildItem `
+            -Path . `
+            -Recurse `
+            -Filter ClassicExplorer.dll |
+            Where-Object {
+              $_.FullName -notmatch '\\obj\\'
+            }
 
           if (-not $dlls) {
-            throw 'ClassicExplorer.dll was not produced.'
+            throw "ClassicExplorer.dll was not produced."
           }
 
           $dlls | ForEach-Object {
-            Write-Host $_.FullName
+            Write-Host "Found: $($_.FullName)"
           }
 
-          New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item $dlls[0].FullName artifact\ClassicExplorer.dll -Force
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path artifact |
+            Out-Null
 
-      - name: Upload x64 DLL
+          Copy-Item `
+            $dlls[0].FullName `
+            artifact\ClassicExplorer.dll `
+            -Force
+
+      - name: Upload ClassicExplorer DLL
         uses: actions/upload-artifact@v4
         with:
           name: ClassicExplorer-x64-Release
