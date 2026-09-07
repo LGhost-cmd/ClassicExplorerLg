@@ -1,0 +1,55 @@
+name: Build ClassicExplorer x64
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - '**.cpp'
+      - '**.h'
+      - '**.c'
+      - '**.rc'
+      - '**.rgs'
+      - '**.idl'
+      - '**.vcxproj'
+      - '**.sln'
+      - '.github/workflows/build-classicexplorer.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        shell: cmd
+        run: msbuild ClassicExplorer.sln /m /p:Configuration=Release /p:Platform=x64 /p:RestorePackages=false
+
+      - name: Find built DLL
+        shell: powershell
+        run: |
+          $dlls = Get-ChildItem -Path . -Recurse -Filter ClassicExplorer.dll |
+            Where-Object { $_.FullName -notmatch '\\obj\\' }
+
+          if (-not $dlls) {
+            throw 'ClassicExplorer.dll was not produced.'
+          }
+
+          $dlls | ForEach-Object {
+            Write-Host $_.FullName
+          }
+
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item $dlls[0].FullName artifact\ClassicExplorer.dll -Force
+
+      - name: Upload x64 DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClassicExplorer-x64-Release
+          path: artifact/ClassicExplorer.dll
+          if-no-files-found: error
