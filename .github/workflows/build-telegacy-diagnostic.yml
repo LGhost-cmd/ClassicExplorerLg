@@ -76,6 +76,7 @@ jobs:
           Copy-Item "telegacy-src\src\response.cpp" artifact\response-diag.cpp -Force
           Copy-Item "telegacy-src\src\helpers.cpp" artifact\helpers-diag.cpp -Force
           Copy-Item "telegacy-src\src\telegacy.cpp" artifact\telegacy-diag.cpp -Force
+          Copy-Item "telegacy-src\src\conversions.cpp" artifact\conversions-diag.cpp -Force
 
           @"
           Telegacy diagnostic build
