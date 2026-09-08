@@ -1,0 +1,10 @@
+{
+  "name": "telegacy-diagnostic",
+  "version-string": "1.0.4-diag",
+  "dependencies": [
+    "libtomcrypt",
+    "miniz",
+    "libwebp",
+    "libjpeg-turbo"
+  ]
+}
