@@ -57,6 +57,30 @@ jobs:
         run: |
           cmake --build telegacy-build --config RelWithDebInfo --parallel
 
+      - name: Extract official Telegacy runtime assets
+        shell: pwsh
+        run: |
+          $setup = "Telegacy-1.0.4-Setup.exe"
+          $runtime = "telegacy-runtime"
+
+          Invoke-WebRequest `
+            "https://github.com/N3xtery/Telegacy/releases/download/v1.0.4/Telegacy-1.0.4-Setup.exe" `
+            -OutFile $setup
+
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+
+          $sevenZip = (Get-Command 7z.exe -ErrorAction Stop).Source
+          & $sevenZip x -y "-o$runtime" $setup
+
+          Write-Host "Extracted runtime files:"
+          Get-ChildItem $runtime -Recurse |
+            Where-Object {
+              $_.Name -eq "emoji_categories.dat" -or
+              $_.Name -eq "emoji_shortcodes.ini" -or
+              $_.Name -eq "emojis"
+            } |
+            Select-Object FullName
+
       - name: Collect diagnostic files
         if: always()
         shell: pwsh
@@ -78,6 +102,34 @@ jobs:
           Copy-Item "telegacy-src\src\telegacy.cpp" artifact\telegacy-diag.cpp -Force
           Copy-Item "telegacy-src\src\conversions.cpp" artifact\conversions-diag.cpp -Force
           Copy-Item "telegacy-src\langs" "artifact\langs" -Recurse -Force
+          $categories = Get-ChildItem "telegacy-runtime" -Recurse -Filter "emoji_categories.dat" |
+            Select-Object -First 1
+
+          $shortcodes = Get-ChildItem "telegacy-runtime" -Recurse -Filter "emoji_shortcodes.ini" |
+            Select-Object -First 1
+
+          $emojiDir = Get-ChildItem "telegacy-runtime" -Recurse -Directory -Filter "emojis" |
+            Where-Object {
+            (Get-ChildItem $_.FullName -Filter "*.ico" -ErrorAction SilentlyContinue).Count -gt 0
+            } |
+            Select-Object -First 1
+
+          if (-not $categories) {
+            throw "emoji_categories.dat was not found in official Telegacy setup"
+          }
+
+          if (-not $shortcodes) {
+            throw "emoji_shortcodes.ini was not found in official Telegacy setup"
+          }
+
+          if (-not $emojiDir) {
+            throw "emojis directory was not found in official Telegacy setup"
+          }
+
+          Copy-Item $categories.FullName "artifact\emoji_categories.dat" -Force
+          Copy-Item $shortcodes.FullName "artifact\emoji_shortcodes.ini" -Force
+          Copy-Item $emojiDir.FullName "artifact\emojis" -Recurse -Force
+          Copy-Item "telegacy-src\src\message.cpp" artifact\message-diag.cpp -Force
 
           @"
           Telegacy diagnostic build
