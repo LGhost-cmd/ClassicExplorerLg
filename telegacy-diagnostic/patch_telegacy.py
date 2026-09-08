@@ -10,8 +10,9 @@ h = root / "include" / "telegacy.h"
 t = root / "src" / "telegacy.cpp"
 r = root / "src" / "response.cpp"
 helpers = root / "src" / "helpers.cpp"
+conversions = root / "src" / "conversions.cpp"
 
-for p in (h, t, r, helpers):
+for p in (h, t, r, helpers, conversions):
     if not p.exists():
         raise SystemExit(f"Missing expected Telegacy v1.0.4 file: {p}")
 def read(p):
@@ -396,5 +397,153 @@ if old_array_find not in s:
 
 s = s.replace(old_array_find, new_array_find, 1)
 write(helpers, s)
+
+# ----- src/conversions.cpp -----
+s = read(conversions)
+
+start = s.find(
+    "int utf8_to_wide(BYTE* src, wchar_t* str, int length) {"
+)
+end = s.find(
+    "\nvoid wide_to_utf8_one(",
+    start
+)
+
+if start < 0 or end < 0:
+    raise SystemExit("Could not locate utf8_to_wide in conversions.cpp")
+
+new_utf8_to_wide = r'''int utf8_to_wide(BYTE* src, wchar_t* str, int length) {
+    if (!src || length <= 0)
+        return 0;
+
+    int str_pos = 0;
+
+    for (int i = 0; i < length; ) {
+        BYTE lead = src[i];
+
+        unsigned int code = 0xFFFD;
+        int cont_bytes = 0;
+        bool valid = true;
+
+        if (lead < 0x80) {
+            code = lead;
+            cont_bytes = 0;
+        } else if ((lead & 0xE0) == 0xC0) {
+            code = lead & 0x1F;
+            cont_bytes = 1;
+        } else if ((lead & 0xF0) == 0xE0) {
+            code = lead & 0x0F;
+            cont_bytes = 2;
+        } else if ((lead & 0xF8) == 0xF0) {
+            code = lead & 0x07;
+            cont_bytes = 3;
+        } else {
+            valid = false;
+
+            diag_log(
+                "UTF8 invalid lead src=%p index=%d length=%d lead=0x%02X",
+                src,
+                i,
+                length,
+                (unsigned int)lead
+            );
+        }
+
+        if (valid && i + cont_bytes >= length) {
+            diag_log(
+                "UTF8 truncated sequence src=%p index=%d length=%d "
+                "lead=0x%02X continuation=%d",
+                src,
+                i,
+                length,
+                (unsigned int)lead,
+                cont_bytes
+            );
+
+            valid = false;
+        }
+
+        if (valid) {
+            for (int j = 0; j < cont_bytes; ++j) {
+                BYTE b = src[i + 1 + j];
+
+                if ((b & 0xC0) != 0x80) {
+                    diag_log(
+                        "UTF8 invalid continuation src=%p index=%d "
+                        "length=%d lead=0x%02X continuation_index=%d "
+                        "byte=0x%02X",
+                        src,
+                        i,
+                        length,
+                        (unsigned int)lead,
+                        j,
+                        (unsigned int)b
+                    );
+
+                    valid = false;
+                    break;
+                }
+
+                code = (code << 6) | (b & 0x3F);
+            }
+        }
+
+        if (valid) {
+            bool invalid_codepoint = false;
+
+            if (cont_bytes == 1 && code < 0x80)
+                invalid_codepoint = true;
+            else if (cont_bytes == 2 && code < 0x800)
+                invalid_codepoint = true;
+            else if (cont_bytes == 3 && code < 0x10000)
+                invalid_codepoint = true;
+
+            if (code >= 0xD800 && code <= 0xDFFF)
+                invalid_codepoint = true;
+
+            if (code > 0x10FFFF)
+                invalid_codepoint = true;
+
+            if (invalid_codepoint) {
+                diag_log(
+                    "UTF8 invalid codepoint src=%p index=%d "
+                    "length=%d lead=0x%02X code=0x%08X",
+                    src,
+                    i,
+                    length,
+                    (unsigned int)lead,
+                    code
+                );
+
+                valid = false;
+            }
+        }
+
+        if (!valid) {
+            code = 0xFFFD;
+            cont_bytes = 0;
+        }
+
+        if (str == NULL) {
+            str_pos += (code <= 0xFFFF) ? 1 : 2;
+        } else if (code <= 0xFFFF) {
+            str[str_pos++] = (wchar_t)code;
+        } else {
+            code -= 0x10000;
+            str[str_pos++] =
+                (wchar_t)(0xD800 + (code >> 10));
+            str[str_pos++] =
+                (wchar_t)(0xDC00 + (code & 0x3FF));
+        }
+
+        i += cont_bytes + 1;
+    }
+
+    return str_pos;
+}
+'''
+
+s = s[:start] + new_utf8_to_wide + s[end:]
+write(conversions, s)
 
 print("Telegacy v1.0.4 diagnostic patch applied successfully.")
