@@ -683,8 +683,12 @@ s = s.replace(old, new, 1)
 
 write(message, s)
 
-# ----- src/telegacy.cpp: media double-click -----
+# ----- src/telegacy.cpp: media double-click + lazy emoji -----
 s = read(t)
+
+# ------------------------------------------------------------------
+# Media: recognise both single and double click
+# ------------------------------------------------------------------
 
 old = """\t\tif (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK && (pENLink->msg == WM_LBUTTONDOWN)) {
 \t\t\tbool found = false;"""
@@ -695,10 +699,34 @@ new = """\t\tif (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK &&
 \t\t\tbool found = false;"""
 
 if old not in s:
-    raise SystemExit("Could not locate chat EN_LINK handler in telegacy.cpp")
+    raise SystemExit(
+        "Could not locate chat EN_LINK handler in telegacy.cpp"
+    )
 
 s = s.replace(old, new, 1)
-# ----- Lazy-load emoji picker -----
+
+
+# ------------------------------------------------------------------
+# Already downloaded media: open only on double click
+# ------------------------------------------------------------------
+
+old = """\t\t\t\t\t\t} else {
+\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {"""
+
+new = """\t\t\t\t\t\t} else if (media_double_click) {
+\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate downloaded media open branch in telegacy.cpp"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------------
+# Emoji: don't build hundreds of icon buttons during startup
+# ------------------------------------------------------------------
 
 old = """\t\tif (fav_emojis.size() == 0) TabCtrl_SetCurSel(hTabs, 1);
 \t\tNMHDR hdr;
@@ -708,14 +736,72 @@ old = """\t\tif (fav_emojis.size() == 0) TabCtrl_SetCurSel(hTabs, 1);
 
 new = """\t\tif (fav_emojis.size() == 0) TabCtrl_SetCurSel(hTabs, 1);
 
-\t\t// Do not populate hundreds of emoji buttons during startup.
-\t\t// The selected category is populated when the user opens the panel."""
+\t\t// Emoji buttons are populated lazily when the panel is opened."""
 
 if old not in s:
-    raise SystemExit("Could not locate eager emoji loading in telegacy.cpp")
+    raise SystemExit(
+        "Could not locate eager emoji loading in telegacy.cpp"
+    )
 
 s = s.replace(old, new, 1)
 
+
+# ------------------------------------------------------------------
+# Emoji toolbar button (case 5):
+# populate the currently selected category on first opening
+# ------------------------------------------------------------------
+
+old = """\t\tcase 5: {
+\t\t\tif (SendMessage(hToolbar, TB_GETSTATE, 5, 0) & TBSTATE_CHECKED) {
+\t\t\t\tShowWindow(hTabs, SW_SHOW);
+\t\t\t\tShowWindow(hOverlayTabs, SW_SHOW);
+\t\t\t} else {
+\t\t\t\tShowWindow(hTabs, SW_HIDE);
+\t\t\t\tShowWindow(hOverlayTabs, SW_HIDE);
+\t\t\t}
+\t\t\tbreak;
+\t\t} """
+
+new = """\t\tcase 5: {
+\t\t\tif (SendMessage(hToolbar, TB_GETSTATE, 5, 0) & TBSTATE_CHECKED) {
+\t\t\t\tShowWindow(hTabs, SW_SHOW);
+\t\t\t\tShowWindow(hOverlayTabs, SW_SHOW);
+
+\t\t\t\t// Lazy-load selected emoji category on first opening.
+\t\t\t\tif (EMOJIS && GetWindow(emojiStatic, GW_CHILD) == NULL) {
+\t\t\t\t\tNMHDR hdr = {0};
+\t\t\t\t\thdr.hwndFrom = hTabs;
+\t\t\t\t\thdr.code = TCN_SELCHANGE;
+
+\t\t\t\t\tdiag_log(
+\t\t\t\t\t\t"emoji picker lazy-load category=%d",
+\t\t\t\t\t\tTabCtrl_GetCurSel(hTabs)
+\t\t\t\t\t);
+
+\t\t\t\t\tSendMessage(
+\t\t\t\t\t\thWnd,
+\t\t\t\t\t\tWM_NOTIFY,
+\t\t\t\t\t\t0,
+\t\t\t\t\t\t(LPARAM)&hdr
+\t\t\t\t\t);
+\t\t\t\t}
+\t\t\t} else {
+\t\t\t\tShowWindow(hTabs, SW_HIDE);
+\t\t\t\tShowWindow(hOverlayTabs, SW_HIDE);
+\t\t\t}
+\t\t\tbreak;
+\t\t} """
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate emoji toolbar case 5 in telegacy.cpp"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# IMPORTANT: save all telegacy.cpp changes
+write(t, s)
 
 # ----- src/conversions.cpp -----
 s = read(conversions)
