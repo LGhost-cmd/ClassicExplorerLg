@@ -14,12 +14,15 @@ helpers = root / "src" / "helpers.cpp"
 for p in (h, t, r, helpers):
     if not p.exists():
         raise SystemExit(f"Missing expected Telegacy v1.0.4 file: {p}")
-
 def read(p):
-    return p.read_text(encoding="utf-8-sig")
+    # Telegacy 1.0.4 sources are old ANSI/8-bit files rather than UTF-8.
+    # latin-1 gives us a lossless 1:1 mapping of every source byte,
+    # while all strings modified by this patch are ASCII.
+    return p.read_text(encoding="latin-1")
 
 def write(p, s):
-    p.write_text(s, encoding="utf-8", newline="\r\n")
+    # Preserve the original 8-bit source representation.
+    p.write_text(s, encoding="latin-1", newline="\r\n")
 
 # ----- include/telegacy.h -----
 s = read(h)
