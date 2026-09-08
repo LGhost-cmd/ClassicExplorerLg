@@ -55,7 +55,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          cmake --build telelegacy-build --config RelWithDebInfo --parallel
+          cmake --build telegacy-build --config RelWithDebInfo --parallel
 
       - name: Collect diagnostic files
         if: always()
@@ -63,10 +63,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifact | Out-Null
 
-          $exe = Get-ChildItem telelegacy-build -Recurse -Filter "telegacy-diagnostic.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $exe = Get-ChildItem telegacy-build -Recurse -Filter "telegacy-diagnostic.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($exe) { Copy-Item $exe.FullName artifact\ }
 
-          $pdb = Get-ChildItem telelegacy-build -Recurse -Filter "telegacy-diagnostic.pdb" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $pdb = Get-ChildItem telegacy-build -Recurse -Filter "telegacy-diagnostic.pdb" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($pdb) { Copy-Item $pdb.FullName artifact\ }
 
           if (Test-Path "telegacy-build\telegacy-diagnostic.map") {
@@ -81,7 +81,7 @@ jobs:
           Telegacy diagnostic build
           =========================
 
-          Run telelegacy-diagnostic.exe normally.
+          Run telegacy-diagnostic.exe normally.
 
           The runtime trace is written to:
               %TEMP%\Telegacy-diagnostic.log
