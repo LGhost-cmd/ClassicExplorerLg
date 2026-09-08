@@ -52,6 +52,21 @@ write(h, s)
 # ----- src/telegacy.cpp -----
 s = read(t)
 include_anchor = "#include <telegacy.h>"
+# Modern Windows SDK declares wWinMain with LPWSTR.
+# Telegacy 1.0.4 used LPSTR and then treated it as wchar_t*.
+old_entry = (
+    "int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, "
+    "LPSTR lpCmdLine, int nCmdShow) {"
+)
+
+new_entry = (
+    "int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, "
+    "LPWSTR lpCmdLine, int nCmdShow) {"
+)
+
+if old_entry not in s:
+    raise SystemExit("Could not find Telegacy wWinMain signature")
+s = s.replace(old_entry, new_entry, 1)
 
 diag_impl = r'''
 #include <stdarg.h>
