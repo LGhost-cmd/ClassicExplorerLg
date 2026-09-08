@@ -48,7 +48,7 @@ jobs:
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
         run: |
-          cmake -S telelegacy-src -B telelegacy-build -A Win32 `
+          cmake -S telegacy-src -B telegacy-build -A Win32 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x86-windows-static
 
