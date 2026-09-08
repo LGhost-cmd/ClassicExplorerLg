@@ -39,8 +39,7 @@ find_library(TOMCRYPT_LIBRARY NAMES tomcrypt libtomcrypt REQUIRED)
 find_path(TOMMATH_INCLUDE_DIR NAMES tommath.h REQUIRED)
 find_library(TOMMATH_LIBRARY NAMES tommath libtommath REQUIRED)
 
-find_path(MINIZ_INCLUDE_DIR NAMES miniz.h REQUIRED)
-find_library(MINIZ_LIBRARY NAMES miniz REQUIRED)
+find_package(miniz CONFIG REQUIRED)
 
 find_path(WEBP_INCLUDE_DIR NAMES webp/decode.h REQUIRED)
 find_library(WEBP_LIBRARY NAMES webp libwebp REQUIRED)
@@ -52,7 +51,6 @@ find_library(JPEG_LIBRARY NAMES jpeg libjpeg REQUIRED)
 target_include_directories(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_INCLUDE_DIR}"
     "${TOMMATH_INCLUDE_DIR}"
-    "${MINIZ_INCLUDE_DIR}"
     "${WEBP_INCLUDE_DIR}"
     "${JPEG_INCLUDE_DIR}"
 )
@@ -74,14 +72,14 @@ target_compile_options(telegacy-diagnostic PRIVATE
     /bigobj
 )
 
-set_property(TARGET telelegacy-diagnostic PROPERTY
+set_property(TARGET telegacy-diagnostic PROPERTY
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
 )
 
 target_link_libraries(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_LIBRARY}"
     "${TOMMATH_LIBRARY}"
-    "${MINIZ_LIBRARY}"
+    miniz::miniz
     "${WEBP_LIBRARY}"
     "${JPEG_LIBRARY}"
 
