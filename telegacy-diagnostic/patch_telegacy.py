@@ -546,4 +546,260 @@ new_utf8_to_wide = r'''int utf8_to_wide(BYTE* src, wchar_t* str, int length) {
 s = s[:start] + new_utf8_to_wide + s[end:]
 write(conversions, s)
 
+# ----- Harden insert_image against failed RichEdit/OLE object creation -----
+s = read(conversions)
+
+start = s.find(
+    "void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFilePict, HBITMAP hBitmap) {"
+)
+end = s.find(
+    "\nint utf8_to_wide(",
+    start
+)
+
+if start < 0 or end < 0:
+    raise SystemExit("Could not locate insert_image in conversions.cpp")
+
+new_insert_image = r'''void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFilePict, HBITMAP hBitmap) {
+    HRESULT hr = E_FAIL;
+    LPRICHEDITOLE pRichEditOle = NULL;
+
+    if (hRichEdit) {
+        LRESULT result = SendMessage(
+            hRichEdit,
+            EM_GETOLEINTERFACE,
+            0,
+            (LPARAM)&pRichEditOle
+        );
+
+        if (!result || !pRichEditOle) {
+            diag_log(
+                "insert_image: EM_GETOLEINTERFACE failed hwnd=%p result=%ld",
+                hRichEdit,
+                (long)result
+            );
+            return;
+        }
+    } else {
+        if (!textHost || !textHost->textServices) {
+            diag_log("insert_image: textHost/textServices is NULL");
+            return;
+        }
+
+        hr = textHost->textServices->TxSendMessage(
+            EM_GETOLEINTERFACE,
+            0,
+            (LPARAM)&pRichEditOle,
+            &hr
+        );
+
+        if (!pRichEditOle) {
+            diag_log(
+                "insert_image: TxSendMessage did not return IRichEditOle hr=0x%08lX",
+                (unsigned long)hr
+            );
+            return;
+        }
+    }
+
+    LPOLECLIENTSITE pClientSite = NULL;
+    hr = pRichEditOle->GetClientSite(&pClientSite);
+
+    if (FAILED(hr) || !pClientSite) {
+        diag_log(
+            "insert_image: GetClientSite failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+        pRichEditOle->Release();
+        return;
+    }
+
+    LPLOCKBYTES pLockBytes = NULL;
+    hr = CreateILockBytesOnHGlobal(NULL, TRUE, &pLockBytes);
+
+    if (FAILED(hr) || !pLockBytes) {
+        diag_log(
+            "insert_image: CreateILockBytesOnHGlobal failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    LPSTORAGE pStorage = NULL;
+    hr = StgCreateDocfileOnILockBytes(
+        pLockBytes,
+        STGM_SHARE_EXCLUSIVE | STGM_CREATE | STGM_READWRITE,
+        0,
+        &pStorage
+    );
+
+    if (FAILED(hr) || !pStorage) {
+        diag_log(
+            "insert_image: StgCreateDocfileOnILockBytes failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    CImageDataObject* pImageDataObject = new CImageDataObject();
+
+    if (!pImageDataObject) {
+        diag_log("insert_image: CImageDataObject allocation failed");
+        pStorage->Release();
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    STGMEDIUM stg = {0};
+    FORMATETC fmt = {0};
+
+    if (hMetaFilePict) {
+        fmt.cfFormat = CF_METAFILEPICT;
+        fmt.dwAspect = DVASPECT_CONTENT;
+        fmt.lindex = -1;
+        fmt.tymed = TYMED_MFPICT;
+
+        stg.tymed = TYMED_MFPICT;
+        stg.hMetaFilePict = hMetaFilePict;
+    } else if (hBitmap) {
+        fmt.cfFormat = CF_BITMAP;
+        fmt.dwAspect = DVASPECT_CONTENT;
+        fmt.lindex = -1;
+        fmt.tymed = TYMED_GDI;
+
+        stg.tymed = TYMED_GDI;
+        stg.hBitmap = hBitmap;
+    } else {
+        diag_log("insert_image: neither metafile nor bitmap supplied");
+
+        delete pImageDataObject;
+        pStorage->Release();
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    hr = pImageDataObject->SetData(&fmt, &stg, TRUE);
+
+    if (FAILED(hr)) {
+        diag_log(
+            "insert_image: SetData failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+        delete pImageDataObject;
+        pStorage->Release();
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    IDataObject* pDataObject = NULL;
+    hr = pImageDataObject->QueryInterface(
+        IID_IDataObject,
+        (void**)&pDataObject
+    );
+
+    if (FAILED(hr) || !pDataObject) {
+        diag_log(
+            "insert_image: QueryInterface(IDataObject) failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+
+        delete pImageDataObject;
+        pStorage->Release();
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    LPOLEOBJECT pObject = NULL;
+
+    hr = OleCreateStaticFromData(
+        pDataObject,
+        IID_IOleObject,
+        OLERENDER_DRAW,
+        NULL,
+        pClientSite,
+        pStorage,
+        (void**)&pObject
+    );
+
+    if (FAILED(hr) || !pObject) {
+        diag_log(
+            "insert_image: OleCreateStaticFromData failed hr=0x%08lX "
+            "metafile=%p bitmap=%p",
+            (unsigned long)hr,
+            hMetaFilePict,
+            hBitmap
+        );
+
+        pDataObject->Release();
+        pStorage->Release();
+        pLockBytes->Release();
+        pClientSite->Release();
+        pRichEditOle->Release();
+        return;
+    }
+
+    hr = OleSetContainedObject(pObject, TRUE);
+
+    CLSID clsid = CLSID_NULL;
+    hr = pObject->GetUserClassID(&clsid);
+
+    if (FAILED(hr)) {
+        diag_log(
+            "insert_image: GetUserClassID failed hr=0x%08lX",
+            (unsigned long)hr
+        );
+    } else {
+        REOBJECT reobject = { sizeof(REOBJECT) };
+        reobject.clsid = clsid;
+        reobject.cp = REO_CP_SELECTION;
+        reobject.dvaspect = DVASPECT_CONTENT;
+        reobject.dwFlags = hMetaFilePict ? REO_BELOWBASELINE : 0;
+        reobject.dwUser = 0;
+        reobject.poleobj = pObject;
+        reobject.polesite = pClientSite;
+        reobject.pstg = pStorage;
+
+        SIZEL sizel = {0};
+        reobject.sizel = sizel;
+
+        hr = pRichEditOle->InsertObject(&reobject);
+
+        if (FAILED(hr)) {
+            diag_log(
+                "insert_image: IRichEditOle::InsertObject failed hr=0x%08lX",
+                (unsigned long)hr
+            );
+
+            wchar_t placeholder[] = {0xFE0F, 0};
+
+            if (hRichEdit)
+                riched_write(hRichEdit, placeholder);
+        }
+    }
+
+    pDataObject->Release();
+    pObject->Release();
+    pClientSite->Release();
+    pStorage->Release();
+    pLockBytes->Release();
+    pRichEditOle->Release();
+}
+'''
+
+s = s[:start] + new_insert_image + s[end:]
+write(conversions, s)
+
 print("Telegacy v1.0.4 diagnostic patch applied successfully.")
