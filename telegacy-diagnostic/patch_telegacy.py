@@ -322,6 +322,71 @@ if case_pos >= 0:
     if show_pos >= 0:
         s = s[:show_pos] + '\t\tdiag_log("messages.dialogFilters -> show_main");\n' + s[show_pos:]
 
+old = """\t\tif (IMAGELOADPOLICY == 2 && documents_count_old != documents.size()) for (int i = documents.size() - documents_count_old - 1; i >= 0; i--) {
+\t\t\tif (!read_le(documents[i].photo_msg_id, 8)) {
+\t\t\t\tget_photo(NULL, &documents[i], dcInfo);
+\t\t\t\tbreak;
+\t\t\t}
+\t\t}"""
+
+new = """\t\tif (IMAGELOADPOLICY == 2 && documents_count_old != documents.size()) for (int i = documents.size() - documents_count_old - 1; i >= 0; i--) {
+
+\t\t\t// photo_size == 1 is used for sticker documents.
+\t\t\t// Do not download those. Custom emoji are handled through rces.
+\t\t\tif (documents[i].photo_size == 1)
+\t\t\t\tcontinue;
+
+\t\t\tif (!read_le(documents[i].photo_msg_id, 8)) {
+\t\t\t\tget_photo(NULL, &documents[i], dcInfo);
+\t\t\t\tbreak;
+\t\t\t}
+\t\t}"""
+
+if old not in s:
+    raise SystemExit("Could not locate history media auto-load block")
+
+s = s.replace(old, new, 1)
+
+old = """\t\tif (messages.size() - messages_count_old < MSGSFETCHCOUNT) no_more_msgs = true;
+\t\telse if (SendMessage(chat, EM_GETFIRSTVISIBLELINE, 0, 0) == 0) get_history();"""
+
+new = """\t\tint inserted_count = (int)messages.size() - messages_count_old;
+
+\t\tdiag_log(
+\t\t\t"history page raw_count=%d inserted=%d loaded=%d limit=%d",
+\t\t\tcount,
+\t\t\tinserted_count,
+\t\t\t(int)messages.size(),
+\t\t\tMSGSFETCHCOUNT
+\t\t);
+
+\t\t// De-duplication may reduce inserted_count.
+\t\t// Only the raw server page size tells us whether history ended.
+\t\tif (count < MSGSFETCHCOUNT) {
+\t\t\tno_more_msgs = true;
+
+\t\t\tdiag_log(
+\t\t\t\t"history reached end raw_count=%d",
+\t\t\t\tcount
+\t\t\t);
+\t\t} else {
+\t\t\tno_more_msgs = false;
+
+\t\t\tif (SendMessage(
+\t\t\t\tchat,
+\t\t\t\tEM_GETFIRSTVISIBLELINE,
+\t\t\t\t0,
+\t\t\t\t0
+\t\t\t) == 0) {
+\t\t\t\tget_history();
+\t\t\t}
+\t\t}"""
+
+if old not in s:
+    raise SystemExit("Could not locate history end test in response.cpp")
+
+s = s.replace(old, new, 1)
+
 write(r, s)
 
 # ----- src/helpers.cpp -----
@@ -509,6 +574,26 @@ new_get_history = r'''void get_history() {
 
 s = s[:start] + new_get_history + s[end:]
 
+# ----- Disable obsolete upstream update popup -----
+
+old = """\tset_tray_icon();
+\tif (CHECKUPDATES) {
+\t\tunsigned threadID;
+\t\t_beginthreadex(NULL, 0, UpdateWorker, NULL, 0, &threadID);
+\t}
+}"""
+
+new = """\tset_tray_icon();
+
+\t// Our build does not use the old Telegacy upstream update checker.
+\tif (CHECKUPDATES)
+\t\tdiag_log("automatic upstream update check suppressed");
+}"""
+
+if old not in s:
+    raise SystemExit("Could not locate automatic update checker in helpers.cpp")
+
+s = s.replace(old, new, 1)
 
 write(helpers, s)
 
@@ -575,6 +660,27 @@ if old not in s:
 
 s = s.replace(old, new, 1)
 
+old = """\t\t\t} else {
+\t\t\t\twchar_t placeholder[] = {0xFE0F, 0};
+\t\t\t\triched_write(chat, placeholder);
+\t\t\t\tif (!to_front && IMAGELOADPOLICY == 2) get_photo(NULL, &document, &dcInfoMain);
+\t\t\t}"""
+
+new = """\t\t\t} else {
+\t\t\t\twchar_t placeholder[] = {0xFE0F, 0};
+\t\t\t\triched_write(chat, placeholder);
+
+\t\t\t\t// Do not download Telegram stickers.
+\t\t\t\t// Custom emoji use RequestedCustomEmoji/rces and are unaffected.
+\t\t\t\tif (!sticker && !to_front && IMAGELOADPOLICY == 2)
+\t\t\t\t\tget_photo(NULL, &document, &dcInfoMain);
+\t\t\t}"""
+
+if old not in s:
+    raise SystemExit("Could not locate sticker photo loading in message.cpp")
+
+s = s.replace(old, new, 1)
+
 write(message, s)
 
 # ----- src/telegacy.cpp: media double-click -----
@@ -592,6 +698,24 @@ if old not in s:
     raise SystemExit("Could not locate chat EN_LINK handler in telegacy.cpp")
 
 s = s.replace(old, new, 1)
+# ----- Lazy-load emoji picker -----
+
+old = """\t\tif (fav_emojis.size() == 0) TabCtrl_SetCurSel(hTabs, 1);
+\t\tNMHDR hdr;
+\t\thdr.hwndFrom = hTabs;
+\t\thdr.code = TCN_SELCHANGE;
+\t\tSendMessage(hWnd, WM_NOTIFY, NULL, (LPARAM)&hdr);"""
+
+new = """\t\tif (fav_emojis.size() == 0) TabCtrl_SetCurSel(hTabs, 1);
+
+\t\t// Do not populate hundreds of emoji buttons during startup.
+\t\t// The selected category is populated when the user opens the panel."""
+
+if old not in s:
+    raise SystemExit("Could not locate eager emoji loading in telegacy.cpp")
+
+s = s.replace(old, new, 1)
+
 
 # ----- src/conversions.cpp -----
 s = read(conversions)
