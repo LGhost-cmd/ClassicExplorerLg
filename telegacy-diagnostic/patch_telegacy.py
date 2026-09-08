@@ -35,6 +35,7 @@ for pragma in [
     '#pragma comment(lib, "libwebp.lib")',
     '#pragma comment(lib, "qrcodegen.lib")',
     '#pragma comment(lib, "libjpeg.lib")',
+	'#pragma comment(lib, "riched20.lib")',
 ]:
     s = s.replace(pragma, "// diagnostic build: linked by CMake // " + pragma)
 
