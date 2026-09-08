@@ -546,6 +546,207 @@ new_utf8_to_wide = r'''int utf8_to_wide(BYTE* src, wchar_t* str, int length) {
 s = s[:start] + new_utf8_to_wide + s[end:]
 write(conversions, s)
 
+# ----- Fix CImageDataObject COM lifetime -----
+s = read(conversions)
+
+start = s.find("class CImageDataObject : IDataObject {")
+end = s.find("\n\nvoid insert_image(", start)
+
+if start < 0 or end < 0:
+    raise SystemExit("Could not locate CImageDataObject in conversions.cpp")
+
+new_data_object = r'''class CImageDataObject : public IDataObject {
+private:
+    LONG m_refCount;
+    BOOL m_bRelease;
+    STGMEDIUM m_stgmed;
+    FORMATETC m_format;
+
+public:
+    CImageDataObject()
+        : m_refCount(1),
+          m_bRelease(FALSE)
+    {
+        ZeroMemory(&m_stgmed, sizeof(m_stgmed));
+        ZeroMemory(&m_format, sizeof(m_format));
+    }
+
+    virtual ~CImageDataObject() {
+        if (m_bRelease && m_stgmed.tymed != TYMED_NULL) {
+            ReleaseStgMedium(&m_stgmed);
+        }
+    }
+
+    STDMETHOD(QueryInterface)(REFIID iid, void** ppvObject) {
+        if (!ppvObject)
+            return E_POINTER;
+
+        *ppvObject = NULL;
+
+        if (iid == IID_IUnknown || iid == IID_IDataObject) {
+            *ppvObject = static_cast<IDataObject*>(this);
+            AddRef();
+            return S_OK;
+        }
+
+        return E_NOINTERFACE;
+    }
+
+    STDMETHOD_(ULONG, AddRef)(void) {
+        return (ULONG)InterlockedIncrement(&m_refCount);
+    }
+
+    STDMETHOD_(ULONG, Release)(void) {
+        LONG refs = InterlockedDecrement(&m_refCount);
+
+        if (refs == 0) {
+            delete this;
+            return 0;
+        }
+
+        return (ULONG)refs;
+    }
+
+    STDMETHOD(GetData)(
+        FORMATETC* pformatetcIn,
+        STGMEDIUM* pmedium
+    ) {
+        if (!pformatetcIn || !pmedium)
+            return E_POINTER;
+
+        ZeroMemory(pmedium, sizeof(*pmedium));
+
+        if (pformatetcIn->cfFormat == CF_METAFILEPICT &&
+            (pformatetcIn->tymed & TYMED_MFPICT) &&
+            m_stgmed.tymed == TYMED_MFPICT) {
+
+            HANDLE hDst = OleDuplicateData(
+                m_stgmed.hMetaFilePict,
+                CF_METAFILEPICT,
+                NULL
+            );
+
+            if (!hDst)
+                return E_HANDLE;
+
+            pmedium->tymed = TYMED_MFPICT;
+            pmedium->hMetaFilePict = (HMETAFILEPICT)hDst;
+            pmedium->pUnkForRelease = NULL;
+
+            return S_OK;
+        }
+
+        if (pformatetcIn->cfFormat == CF_BITMAP &&
+            (pformatetcIn->tymed & TYMED_GDI) &&
+            m_stgmed.tymed == TYMED_GDI) {
+
+            HANDLE hDst = OleDuplicateData(
+                m_stgmed.hBitmap,
+                CF_BITMAP,
+                NULL
+            );
+
+            if (!hDst)
+                return E_HANDLE;
+
+            pmedium->tymed = TYMED_GDI;
+            pmedium->hBitmap = (HBITMAP)hDst;
+            pmedium->pUnkForRelease = NULL;
+
+            return S_OK;
+        }
+
+        return DV_E_FORMATETC;
+    }
+
+    STDMETHOD(GetDataHere)(
+        FORMATETC*,
+        STGMEDIUM*
+    ) {
+        return E_NOTIMPL;
+    }
+
+    STDMETHOD(QueryGetData)(FORMATETC* pformatetc) {
+        if (!pformatetc)
+            return E_POINTER;
+
+        if (m_stgmed.tymed == TYMED_MFPICT &&
+            pformatetc->cfFormat == CF_METAFILEPICT &&
+            (pformatetc->tymed & TYMED_MFPICT)) {
+            return S_OK;
+        }
+
+        if (m_stgmed.tymed == TYMED_GDI &&
+            pformatetc->cfFormat == CF_BITMAP &&
+            (pformatetc->tymed & TYMED_GDI)) {
+            return S_OK;
+        }
+
+        return DV_E_FORMATETC;
+    }
+
+    STDMETHOD(GetCanonicalFormatEtc)(
+        FORMATETC*,
+        FORMATETC* pOut
+    ) {
+        if (pOut)
+            pOut->ptd = NULL;
+
+        return E_NOTIMPL;
+    }
+
+    STDMETHOD(SetData)(
+        FORMATETC* pformatetc,
+        STGMEDIUM* pmedium,
+        BOOL fRelease
+    ) {
+        if (!pformatetc || !pmedium)
+            return E_POINTER;
+
+        if (m_bRelease && m_stgmed.tymed != TYMED_NULL) {
+            ReleaseStgMedium(&m_stgmed);
+        }
+
+        m_format = *pformatetc;
+        m_stgmed = *pmedium;
+        m_bRelease = fRelease;
+
+        return S_OK;
+    }
+
+    STDMETHOD(EnumFormatEtc)(
+        DWORD,
+        IEnumFORMATETC**
+    ) {
+        return E_NOTIMPL;
+    }
+
+    STDMETHOD(DAdvise)(
+        FORMATETC*,
+        DWORD,
+        IAdviseSink*,
+        DWORD*
+    ) {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+    STDMETHOD(DUnadvise)(DWORD) {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+
+    STDMETHOD(EnumDAdvise)(
+        IEnumSTATDATA**
+    ) {
+        return OLE_E_ADVISENOTSUPPORTED;
+    }
+};
+'''
+
+s = s[:start] + new_data_object + s[end:]
+write(conversions, s)
+
+
+
 # ----- Harden insert_image against failed RichEdit/OLE object creation -----
 s = read(conversions)
 
@@ -679,7 +880,7 @@ new_insert_image = r'''void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFile
     } else {
         diag_log("insert_image: neither metafile nor bitmap supplied");
 
-        delete pImageDataObject;
+        pImageDataObject->Release();
         pStorage->Release();
         pLockBytes->Release();
         pClientSite->Release();
@@ -687,14 +888,14 @@ new_insert_image = r'''void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFile
         return;
     }
 
-    hr = pImageDataObject->SetData(&fmt, &stg, TRUE);
+    hr = pImageDataObject->SetData(&fmt, &stg, FALSE);
 
     if (FAILED(hr)) {
         diag_log(
             "insert_image: SetData failed hr=0x%08lX",
             (unsigned long)hr
         );
-        delete pImageDataObject;
+        pImageDataObject->Release();
         pStorage->Release();
         pLockBytes->Release();
         pClientSite->Release();
@@ -714,7 +915,7 @@ new_insert_image = r'''void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFile
             (unsigned long)hr
         );
 
-        delete pImageDataObject;
+        pImageDataObject->Release();
         pStorage->Release();
         pLockBytes->Release();
         pClientSite->Release();
@@ -722,18 +923,20 @@ new_insert_image = r'''void insert_image(HWND hRichEdit, HMETAFILEPICT hMetaFile
         return;
     }
 
+	pImageDataObject->Release();
+	pImageDataObject = NULL;
+
     LPOLEOBJECT pObject = NULL;
 
     hr = OleCreateStaticFromData(
-        pDataObject,
-        IID_IOleObject,
-        OLERENDER_DRAW,
-        NULL,
-        pClientSite,
-        pStorage,
-        (void**)&pObject
-    );
-
+    	pDataObject,
+    	IID_IOleObject,
+    	OLERENDER_FORMAT,
+    	&fmt,
+    	pClientSite,
+    	pStorage,
+    	(void**)&pObject
+	);
     if (FAILED(hr) || !pObject) {
         diag_log(
             "insert_image: OleCreateStaticFromData failed hr=0x%08lX "
