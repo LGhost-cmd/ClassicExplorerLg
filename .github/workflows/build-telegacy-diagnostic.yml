@@ -1,0 +1,103 @@
+name: Build Telegacy diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout build helper files
+        uses: actions/checkout@v4
+
+      - name: Clone exact Telegacy 1.0.4 source
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v1.0.4 https://github.com/N3xtery/Telegacy.git telelegacy-src
+
+      - name: Copy diagnostic build files
+        shell: pwsh
+        run: |
+          Copy-Item "telegacy-diagnostic\CMakeLists.txt" "telegacy-src\CMakeLists.txt" -Force
+          Copy-Item "telegacy-diagnostic\vcpkg.json" "telegacy-src\vcpkg.json" -Force
+
+      - name: Vendor Nayuki C QR generator
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "telegacy-src\third_party\qrcodegen" | Out-Null
+          $base = "https://raw.githubusercontent.com/nayuki/QR-Code-generator/master/c"
+          Invoke-WebRequest "$base/qrcodegen.h" -OutFile "telegacy-src\third_party\qrcodegen\qrcodegen.h"
+          Invoke-WebRequest "$base/qrcodegen.c" -OutFile "telegacy-src\third_party\qrcodegen\qrcodegen.c"
+
+      - name: Apply diagnostic instrumentation
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_telegacy.py" "telegacy-src"
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          Write-Host "VCPKG_INSTALLATION_ROOT=$env:VCPKG_INSTALLATION_ROOT"
+          cmake --version
+          if (-not $env:VCPKG_INSTALLATION_ROOT) {
+            throw "GitHub runner did not expose VCPKG_INSTALLATION_ROOT."
+          }
+
+      - name: Configure Win32 RelWithDebInfo
+        shell: pwsh
+        run: |
+          cmake -S telelegacy-src -B telelegacy-build -A Win32 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x86-windows-static
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build telelegacy-build --config RelWithDebInfo --parallel
+
+      - name: Collect diagnostic files
+        if: always()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact | Out-Null
+
+          $exe = Get-ChildItem telelegacy-build -Recurse -Filter "telegacy-diagnostic.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exe) { Copy-Item $exe.FullName artifact\ }
+
+          $pdb = Get-ChildItem telelegacy-build -Recurse -Filter "telegacy-diagnostic.pdb" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($pdb) { Copy-Item $pdb.FullName artifact\ }
+
+          if (Test-Path "telegacy-build\telegacy-diagnostic.map") {
+            Copy-Item "telegacy-build\telegacy-diagnostic.map" artifact\
+          }
+
+          Copy-Item "telegacy-src\src\response.cpp" artifact\response-diag.cpp -Force
+          Copy-Item "telegacy-src\src\helpers.cpp" artifact\helpers-diag.cpp -Force
+          Copy-Item "telegacy-src\src\telegacy.cpp" artifact\telegacy-diag.cpp -Force
+
+          @"
+          Telegacy diagnostic build
+          =========================
+
+          Run telelegacy-diagnostic.exe normally.
+
+          The runtime trace is written to:
+              %TEMP%\Telegacy-diagnostic.log
+
+          After the crash/diagnostic termination, send:
+          1. %TEMP%\Telegacy-diagnostic.log
+          2. the new Windows Event Viewer crash entry, if one exists
+          3. if Windows created one, the new .mdmp file
+
+          This build deliberately DOES NOT log message bodies, phone numbers,
+          authentication tokens, passwords, or session.dat contents.
+          "@ | Set-Content artifact\HOW_TO_TEST.txt -Encoding UTF8
+
+      - name: Upload diagnostic artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegacy-1.0.4-diagnostic-x86
+          path: artifact
+          if-no-files-found: error
