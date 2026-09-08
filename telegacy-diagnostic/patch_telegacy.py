@@ -73,6 +73,53 @@ diag_impl = r'''
 #include <stdarg.h>
 
 // --------------------------------------------------------------------------------------
+// Modern RichEdit compatibility
+// --------------------------------------------------------------------------------------
+// Current Windows SDKs no longer reliably ship Riched20.lib.
+// Resolve CreateTextServices from the system DLL at runtime instead.
+
+extern "C" const IID IID_ITextHost = {
+    0xc5bdd8d0,
+    0xd26e,
+    0x11ce,
+    {0xa8, 0x9e, 0x00, 0xaa, 0x00, 0x6c, 0xad, 0xc5}
+};
+
+extern "C" HRESULT WINAPI CreateTextServices(
+    IUnknown* punkOuter,
+    ITextHost* pITextHost,
+    IUnknown** ppUnk
+) {
+    typedef HRESULT (WINAPI *CreateTextServicesProc)(
+        IUnknown*,
+        ITextHost*,
+        IUnknown**
+    );
+
+    static HMODULE module = NULL;
+    static CreateTextServicesProc proc = NULL;
+
+    if (!module) {
+        module = LoadLibraryW(L"Msftedit.dll");
+
+        // Fallback for older systems / RichEdit versions.
+        if (!module)
+            module = LoadLibraryW(L"Riched20.dll");
+
+        if (module) {
+            proc = reinterpret_cast<CreateTextServicesProc>(
+                GetProcAddress(module, "CreateTextServices")
+            );
+        }
+    }
+
+    if (!proc)
+        return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
+    return proc(punkOuter, pITextHost, ppUnk);
+}
+
+// --------------------------------------------------------------------------------------
 // Diagnostic logging
 // --------------------------------------------------------------------------------------
 // The log goes to %TEMP%\Telegacy-diagnostic.log so it is available before
