@@ -11,8 +11,9 @@ t = root / "src" / "telegacy.cpp"
 r = root / "src" / "response.cpp"
 helpers = root / "src" / "helpers.cpp"
 conversions = root / "src" / "conversions.cpp"
+message = root / "src" / "message.cpp"
 
-for p in (h, t, r, helpers, conversions):
+for p in (h, t, r, helpers, message, conversions):
     if not p.exists():
         raise SystemExit(f"Missing expected Telegacy v1.0.4 file: {p}")
 def read(p):
@@ -396,7 +397,201 @@ if old_array_find not in s:
     raise SystemExit("Exact v1.0.4 array_find implementation was not found; refusing to patch wrong source.")
 
 s = s.replace(old_array_find, new_array_find, 1)
+# ----- Fix get_history pagination / duplicate messages -----
+
+start = s.find("void get_history() {")
+end = s.find("\nvoid set_typing(", start)
+
+if start < 0 or end < 0:
+    raise SystemExit("Could not locate get_history in helpers.cpp")
+
+new_get_history = r'''void get_history() {
+    BYTE unenc_query[112];
+    BYTE enc_query[136];
+
+    internal_header(unenc_query, true);
+
+    write_le(unenc_query + 32, 0x4423e6c5, 4);
+
+    char offset = place_peer(
+        unenc_query + 36,
+        current_peer,
+        true
+    );
+
+    int oldest_id = messages.size() ? messages.front().id : 0;
+
+    // offset_id: continue strictly from the oldest message already loaded.
+    write_le(
+        unenc_query + 36 + offset,
+        oldest_id,
+        4
+    );
+
+    // offset_date
+    memset(
+        unenc_query + 40 + offset,
+        0,
+        4
+    );
+
+    // add_offset
+    memset(
+        unenc_query + 44 + offset,
+        0,
+        4
+    );
+
+    // limit
+    write_le(
+        unenc_query + 48 + offset,
+        MSGSFETCHCOUNT,
+        4
+    );
+
+    // max_id
+    memset(
+        unenc_query + 52 + offset,
+        0,
+        4
+    );
+
+    // min_id
+    memset(
+        unenc_query + 56 + offset,
+        0,
+        4
+    );
+
+    // hash
+    memset(
+        unenc_query + 60 + offset,
+        0,
+        8
+    );
+
+    diag_log(
+        "get_history oldest_id=%d loaded=%d limit=%d",
+        oldest_id,
+        (int)messages.size(),
+        MSGSFETCHCOUNT
+    );
+
+    char padding_len = get_padding(68 + offset);
+
+    write_le(
+        unenc_query + 28,
+        36 + offset,
+        4
+    );
+
+    fortuna_read(
+        unenc_query + 68 + offset,
+        padding_len,
+        &prng
+    );
+
+    char len = 68 + offset + padding_len;
+
+    convert_message(
+        unenc_query,
+        enc_query,
+        len,
+        0
+    );
+
+    send_query(
+        enc_query,
+        len + 24
+    );
+}
+'''
+
+s = s[:start] + new_get_history + s[end:]
+
+
 write(helpers, s)
+
+# ----- src/message.cpp: protect history against duplicate message IDs -----
+
+s = read(message)
+
+old = """\tint msg_id_int = read_le(msg_id, 4);
+\tbool duplicate = (peer && msg_id_int <= peer->last_recv && !to_front);
+\tif (!duplicate && !to_front && peer) peer->last_recv = msg_id_int;"""
+
+new = """\tint msg_id_int = read_le(msg_id, 4);
+
+\tbool duplicate = (peer && msg_id_int <= peer->last_recv && !to_front);
+
+\tbool history_duplicate = false;
+
+\tif (to_front &&
+\t\tmessage_adding &&
+\t\t!editing &&
+\t\t!rplhelper &&
+\t\tmsg_id_int != 0) {
+
+\t\tfor (int i = 0; i < messages.size(); i++) {
+\t\t\tif (messages[i].id == msg_id_int) {
+\t\t\t\thistory_duplicate = true;
+
+\t\t\t\tdiag_log(
+\t\t\t\t\t"message history duplicate id=%d existing_index=%d loaded=%d",
+\t\t\t\t\tmsg_id_int,
+\t\t\t\t\ti,
+\t\t\t\t\t(int)messages.size()
+\t\t\t\t);
+
+\t\t\t\tbreak;
+\t\t\t}
+\t\t}
+\t}
+
+\tif (history_duplicate)
+\t\tduplicate = true;
+
+\tif (!duplicate && !to_front && peer)
+\t\tpeer->last_recv = msg_id_int;"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate message duplicate-check block in message.cpp"
+    )
+
+s = s.replace(old, new, 1)
+
+
+old = """\tif (message_adding)
+\t\tmessage_adder(service, to_front, flags_msg, msg_id, msg_bytes, NULL, chat_member_id, &format_vecs[0], reactions, msgrpl, msgfwd, views, groupmed_end, footer, editing, date);"""
+
+new = """\tif (message_adding && !history_duplicate)
+\t\tmessage_adder(service, to_front, flags_msg, msg_id, msg_bytes, NULL, chat_member_id, &format_vecs[0], reactions, msgrpl, msgfwd, views, groupmed_end, footer, editing, date);"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate message_adder call in message.cpp"
+    )
+
+s = s.replace(old, new, 1)
+
+write(message, s)
+
+# ----- src/telegacy.cpp: media double-click -----
+s = read(t)
+
+old = """\t\tif (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK && (pENLink->msg == WM_LBUTTONDOWN)) {
+\t\t\tbool found = false;"""
+
+new = """\t\tif (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK &&
+\t\t\t(pENLink->msg == WM_LBUTTONDOWN || pENLink->msg == WM_LBUTTONDBLCLK)) {
+\t\t\tbool media_double_click = (pENLink->msg == WM_LBUTTONDBLCLK);
+\t\t\tbool found = false;"""
+
+if old not in s:
+    raise SystemExit("Could not locate chat EN_LINK handler in telegacy.cpp")
+
+s = s.replace(old, new, 1)
 
 # ----- src/conversions.cpp -----
 s = read(conversions)
