@@ -15,7 +15,7 @@ jobs:
       - name: Clone exact Telegacy 1.0.4 source
         shell: pwsh
         run: |
-          git clone --depth 1 --branch v1.0.4 https://github.com/N3xtery/Telegacy.git telelegacy-src
+          git clone --depth 1 --branch v1.0.4 https://github.com/N3xtery/Telegacy.git telegacy-src
 
       - name: Copy diagnostic build files
         shell: pwsh
