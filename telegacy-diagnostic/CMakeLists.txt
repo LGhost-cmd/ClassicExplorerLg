@@ -95,7 +95,6 @@ target_link_libraries(telegacy-diagnostic PRIVATE
     wsock32
     comctl32
     winmm
-    riched20
     htmlhelp
     winspool
     odbc32
