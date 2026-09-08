@@ -48,7 +48,8 @@ if "void diag_log(" not in s:
     s = s.replace(
         anchor,
         anchor + '\n\n// Diagnostic build: logs parser/state metadata only, never message text.\n'
-                 'void diag_log(const char* format, ...);'
+                 'void diag_log(const char* format, ...);\n'
+				'extern volatile LONG history_request_pending;'
     )
 write(h, s)
 
@@ -360,8 +361,11 @@ new = """\t\tint inserted_count = (int)messages.size() - messages_count_old;
 \t\t\tMSGSFETCHCOUNT
 \t\t);
 
-\t\t// De-duplication may reduce inserted_count.
-\t\t// Only the raw server page size tells us whether history ended.
+\t\t// The current getHistory request is completely processed.
+\t\tInterlockedExchange(&history_request_pending, 0);
+
+\t\t// De-duplication can reduce inserted_count.
+\t\t// Only the raw Telegram page size determines end of history.
 \t\tif (count < MSGSFETCHCOUNT) {
 \t\t\tno_more_msgs = true;
 
@@ -371,15 +375,6 @@ new = """\t\tint inserted_count = (int)messages.size() - messages_count_old;
 \t\t\t);
 \t\t} else {
 \t\t\tno_more_msgs = false;
-
-\t\t\tif (SendMessage(
-\t\t\t\tchat,
-\t\t\t\tEM_GETFIRSTVISIBLELINE,
-\t\t\t\t0,
-\t\t\t\t0
-\t\t\t) == 0) {
-\t\t\t\tget_history();
-\t\t\t}
 \t\t}"""
 
 if old not in s:
@@ -387,11 +382,45 @@ if old not in s:
 
 s = s.replace(old, new, 1)
 
+old = """\t\tif (count == 0 && messages.size() == 0 && current_peer != NULL) {
+\t\t\tremove_peer(current_peer);
+\t\t\tbreak;
+\t\t}"""
+
+new = """\t\tif (count == 0 && messages.size() == 0 && current_peer != NULL) {
+\t\t\tInterlockedExchange(&history_request_pending, 0);
+\t\t\tremove_peer(current_peer);
+\t\t\tbreak;
+\t\t}"""
+
+if old not in s:
+    raise SystemExit("Could not locate empty history early exit")
+
+s = s.replace(old, new, 1)
+
+old = """\t\tif (!current_peer || neworrep || memcmp(unenc_response + offset2, current_peer->id, 8) != 0) break;"""
+
+new = """\t\tif (!current_peer || neworrep || memcmp(unenc_response + offset2, current_peer->id, 8) != 0) {
+\t\t\tInterlockedExchange(&history_request_pending, 0);
+\t\t\tbreak;
+\t\t}"""
+
+if old not in s:
+    raise SystemExit("Could not locate history peer mismatch exit")
+
+s = s.replace(old, new, 1)
+
 write(r, s)
 
 # ----- src/helpers.cpp -----
 s = read(helpers)
-
+if "volatile LONG history_request_pending = 0;" not in s:
+    s = s.replace(
+        "#include <telegacy.h>\n",
+        "#include <telegacy.h>\n\n"
+        "volatile LONG history_request_pending = 0;\n",
+        1
+    )
 folder_anchor = "int folder_handler(BYTE* unenc_response, ChatsFolder* folder, int i, bool update) {\n"
 if folder_anchor in s and 'diag_log("folder_handler' not in s:
     s = s.replace(
@@ -471,6 +500,19 @@ if start < 0 or end < 0:
     raise SystemExit("Could not locate get_history in helpers.cpp")
 
 new_get_history = r'''void get_history() {
+    if (InterlockedCompareExchange(
+            &history_request_pending,
+            1,
+            0
+        ) != 0) {
+
+        diag_log(
+            "get_history skipped: request already pending loaded=%d",
+            (int)messages.size()
+        );
+
+        return;
+    }
     BYTE unenc_query[112];
     BYTE enc_query[136];
 
