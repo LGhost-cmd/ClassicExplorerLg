@@ -976,23 +976,23 @@ elif "wParam == 32" not in s[
 # Change arrow handlers from page navigation to hit navigation.
 # -----------------------------------------------------------------------------
 
-old_handlers = r'''		case 3002: { // newer server-search page
+old_handlers = r'''		case 32: { // newer server-search page
 			message_search_newer_page();
 			break;
 		}
 
-		case 3003: { // older server-search page
+		case 33: { // older server-search page
 			message_search_older_page();
 			break;
 		}
 '''
 
-new_handlers = r'''		case 3002: { // previous search result
+new_handlers = r'''		case 32: { // previous search result
 			message_search_previous_result();
 			break;
 		}
 
-		case 3003: { // next search result
+		case 33: { // next search result
 			message_search_next_result();
 			break;
 		}
@@ -1071,7 +1071,7 @@ if "hMessageSearchStatus = CreateWindowW(" not in s:
 			65,
 			22,
 			hWnd,
-			(HMENU)3005,
+			(HMENU)35,
 			NULL,
 			NULL
 		);
@@ -1671,11 +1671,11 @@ if "static void message_search_handle_context_response(" not in s:
 
 # -----------------------------------------------------------------------------
 # Route messages.Messages-family RPCs to context before search/history.
+#
+# Scope the search to the messages.Messages switch case. The same
+# message_search_matches_rpc(...) condition is also used in rpc_error, so a
+# global s.find() can insert the context handler into the wrong case.
 # -----------------------------------------------------------------------------
-
-route_anchor = (
-    "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {\n"
-)
 
 context_route = (
     "\t\tif (message_search_matches_context_rpc(last_rpcresult_msgid)) {\n"
@@ -1690,26 +1690,63 @@ context_route = (
 )
 
 if context_route not in s:
-    pos = s.find(route_anchor)
+    messages_case_candidates = [
+        "\tcase 0x5f206716:",
+        "\tcase 0x3a54685e:",
+        "\tcase 0xc776ba4e:",
+        "\tcase 0x8c718e87:",
+    ]
 
-    if pos < 0:
+    messages_case_pos = -1
+
+    for marker in messages_case_candidates:
+        pos = s.find(marker)
+        if pos >= 0 and (
+            messages_case_pos < 0 or
+            pos < messages_case_pos
+        ):
+            messages_case_pos = pos
+
+    if messages_case_pos < 0:
         raise SystemExit(
-            "Could not locate server-search response route."
+            "Could not locate messages.Messages switch case."
         )
 
-    s = s[:pos] + context_route + s[pos:]
+    next_case_pos = s.find(
+        "\n\tcase ",
+        messages_case_pos + 1
+    )
+
+    search_route_pos = s.find(
+        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {",
+        messages_case_pos
+    )
+
+    if (
+        search_route_pos < 0 or
+        (
+            next_case_pos >= 0 and
+            search_route_pos >= next_case_pos
+        )
+    ):
+        raise SystemExit(
+            "Could not locate server-search response route inside messages.Messages."
+        )
+
+    s = (
+        s[:search_route_pos] +
+        context_route +
+        s[search_route_pos:]
+    )
 
 
 # -----------------------------------------------------------------------------
 # Route context rpc_error as well.
+#
+# Do not match the formatting of message_search_handle_rpc_error(...).
+# patch_server_search.py may emit it on one line or on several lines depending
+# on which diagnostic patches ran before it.
 # -----------------------------------------------------------------------------
-
-rpc_search_anchor = (
-    "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {\n"
-    "\t\t\tmessage_search_handle_rpc_error(error_code, error_message);\n"
-    "\t\t\tbreak;\n"
-    "\t\t}\n"
-)
 
 rpc_context = (
     "\t\tif (message_search_matches_context_rpc(last_rpcresult_msgid)) {\n"
@@ -1722,14 +1759,40 @@ rpc_context = (
 )
 
 if rpc_context not in s:
-    pos = s.find(rpc_search_anchor)
+    rpc_case = "\tcase 0x2144ca19: { // rpc_error\n"
+    rpc_case_pos = s.find(rpc_case)
 
-    if pos < 0:
+    if rpc_case_pos < 0:
         raise SystemExit(
-            "Could not locate server-search rpc_error route."
+            "Could not locate rpc_error case in response.cpp."
         )
 
-    s = s[:pos] + rpc_context + s[pos:]
+    next_case_pos = s.find(
+        "\n\tcase ",
+        rpc_case_pos + len(rpc_case)
+    )
+
+    search_route_pos = s.find(
+        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {",
+        rpc_case_pos
+    )
+
+    if (
+        search_route_pos < 0 or
+        (
+            next_case_pos >= 0 and
+            search_route_pos >= next_case_pos
+        )
+    ):
+        raise SystemExit(
+            "Could not locate server-search rpc_error route inside rpc_error case."
+        )
+
+    s = (
+        s[:search_route_pos] +
+        rpc_context +
+        s[search_route_pos:]
+    )
 
 
 write(r, s)
