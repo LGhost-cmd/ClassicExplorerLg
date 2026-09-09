@@ -377,12 +377,26 @@ write(t, s)
 # ----- src/response.cpp -----
 s = read(r)
 
-diag_log(
-    "upload.file state downloads=%d documents=%d custom_emoji=%d",
-    (int)downloading_docs.size(),
-    (int)documents.size(),
-    (int)rces.size()
-);
+# ----- Diagnostic logging for upload.file -----
+
+old = "\tcase 0x96a18d5: { // upload.file\n"
+
+new = (
+    "\tcase 0x96a18d5: { // upload.file\n"
+    "\t\tdiag_log(\n"
+    "\t\t\t\"upload.file state downloads=%d documents=%d custom_emoji=%d\",\n"
+    "\t\t\t(int)downloading_docs.size(),\n"
+    "\t\t\t(int)documents.size(),\n"
+    "\t\t\t(int)rces.size()\n"
+    "\t\t);\n"
+)
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate upload.file handler in response.cpp"
+    )
+
+s = s.replace(old, new, 1)
 
 old = "\tunsigned int constructor = read_le(unenc_response, 4);\n\tswitch (constructor) {"
 new = (
