@@ -233,29 +233,44 @@ if "DiagnosticBootstrap" not in s:
 # Downloads: always use the user's Downloads\Telegram directory
 # ------------------------------------------------------------------
 
-old = r'''\twchar_t download_path[MAX_PATH];
-\tGetPrivateProfileString(L"General", L"download_path", L"", download_path, MAX_PATH, appdata_path);
-\tif (!download_path[0]) {
-\t\tHKEY hKey;
-\t\tif (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-\t\t\tDWORD type = REG_SZ;
-\t\t\tDWORD size = MAX_PATH;
-\t\t\tif (RegQueryValueEx(hKey, L"Desktop", NULL, &type, (LPBYTE)download_path, &size) != ERROR_SUCCESS) wcscpy(download_path, L"C:\\");
-\t\t\tRegCloseKey(hKey);
-\t\t}
-\t}
-\tSetCurrentDirectory(download_path);'''
+download_anchor = (
+    '\tGetPrivateProfileString('
+    'L"General", L"download_path", L"", '
+    'download_path, MAX_PATH, appdata_path);'
+)
 
-new = r'''\twchar_t download_path[MAX_PATH] = {0};
+anchor_pos = s.find(download_anchor)
+
+if anchor_pos < 0:
+    raise SystemExit(
+        "Could not locate download_path GetPrivateProfileString in telegacy.cpp"
+    )
+
+start = s.rfind(
+    "\twchar_t download_path[MAX_PATH];",
+    0,
+    anchor_pos
+)
+
+end_marker = "\tSetCurrentDirectory(download_path);"
+end = s.find(end_marker, anchor_pos)
+
+if start < 0 or end < 0:
+    raise SystemExit(
+        "Could not locate Telegacy download_path initialization block"
+    )
+
+end += len(end_marker)
+
+new_download_block = """\twchar_t download_path[MAX_PATH] = {0};
 \twchar_t downloads_root[MAX_PATH] = {0};
 
-\t// Windows stores the user's Downloads known-folder path here.
-\t// Using User Shell Folders also respects a relocated Downloads folder.
+\t// Use the real Windows Downloads known-folder location.
 \tHKEY hKey;
 
 \tif (RegOpenKeyExW(
 \t\tHKEY_CURRENT_USER,
-\t\tL"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
+\t\tL"Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Explorer\\\\User Shell Folders",
 \t\t0,
 \t\tKEY_READ,
 \t\t&hKey
@@ -278,21 +293,22 @@ new = r'''\twchar_t download_path[MAX_PATH] = {0};
 \t\tRegCloseKey(hKey);
 \t}
 
-\t// User Shell Folders normally stores REG_EXPAND_SZ values such as
-\t// %USERPROFILE%\\Downloads.
+\t// The registry usually contains %USERPROFILE%\\Downloads.
 \tif (downloads_root[0]) {
 \t\twchar_t expanded[MAX_PATH] = {0};
 
-\t\tif (ExpandEnvironmentStringsW(
+\t\tDWORD expanded_len = ExpandEnvironmentStringsW(
 \t\t\tdownloads_root,
 \t\t\texpanded,
 \t\t\tMAX_PATH
-\t\t) > 0) {
+\t\t);
+
+\t\tif (expanded_len > 0 && expanded_len < MAX_PATH) {
 \t\t\twcscpy(downloads_root, expanded);
 \t\t}
 \t}
 
-\t// Safe fallback if the Downloads known-folder value couldn't be read.
+\t// Fallback to %USERPROFILE%\\Downloads.
 \tif (!downloads_root[0]) {
 \t\tDWORD len = GetEnvironmentVariableW(
 \t\t\tL"USERPROFILE",
@@ -300,48 +316,61 @@ new = r'''\twchar_t download_path[MAX_PATH] = {0};
 \t\t\tMAX_PATH
 \t\t);
 
-\t\tif (!len || len >= MAX_PATH)
-\t\t\twcscpy(downloads_root, L"C:\\");
+\t\tif (!len || len >= MAX_PATH) {
+\t\t\twcscpy(downloads_root, L"C:\\\\");
+\t\t}
 
-\t\tif (wcslen(downloads_root) + 10 < MAX_PATH)
-\t\t\twcscat(downloads_root, L"\\Downloads");
+\t\tif (wcslen(downloads_root) + 11 < MAX_PATH) {
+\t\t\twcscat(downloads_root, L"\\\\Downloads");
+\t\t}
 \t}
 
 \t_snwprintf(
 \t\tdownload_path,
 \t\tMAX_PATH - 1,
-\t\tL"%s\\Telegram",
+\t\tL"%s\\\\Telegram",
 \t\tdownloads_root
 \t);
 
 \tdownload_path[MAX_PATH - 1] = 0;
 
-\t// Create Downloads\\Telegram if it doesn't exist yet.
-\tCreateDirectoryW(download_path, NULL);
+\tDWORD attrs = GetFileAttributesW(download_path);
+
+\tif (
+\t\tattrs == INVALID_FILE_ATTRIBUTES ||
+\t\t!(attrs & FILE_ATTRIBUTE_DIRECTORY)
+\t) {
+\t\tif (!CreateDirectoryW(download_path, NULL)) {
+\t\t\tDWORD error = GetLastError();
+
+\t\t\tif (error != ERROR_ALREADY_EXISTS) {
+\t\t\t\tdiag_log(
+\t\t\t\t\t"CreateDirectory Telegram failed error=%lu",
+\t\t\t\t\terror
+\t\t\t\t);
+\t\t\t}
+\t\t}
+\t}
 
 \tif (!SetCurrentDirectoryW(download_path)) {
 \t\tdiag_log(
-\t\t\t"failed to set Telegram download directory error=%lu",
+\t\t\t"SetCurrentDirectory Telegram failed error=%lu",
 \t\t\tGetLastError()
 \t\t);
 \t} else {
-\t\tdiag_log("Telegram download directory configured");
+\t\tdiag_log(
+\t\t\t"Telegram download directory configured"
+\t\t);
 \t}
 
-\t// Keep options.ini consistent with the actual directory.
 \tWritePrivateProfileStringW(
 \t\tL"General",
 \t\tL"download_path",
 \t\tdownload_path,
 \t\tappdata_path
-\t);'''
+\t);"""
 
-if old not in s:
-    raise SystemExit(
-        "Could not locate Telegacy download_path initialization"
-    )
-
-s = s.replace(old, new, 1)
+s = s[:start] + new_download_block + s[end:]
 
 write(t, s)
 
