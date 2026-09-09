@@ -840,33 +840,69 @@ static void message_search_handle_server_response(
 
 # -----------------------------------------------------------------------------
 # Intercept search RPC errors so the single-flight state does not remain stuck.
+#
+# Do not match the whole rpc_error prologue: patch_telegacy.py may already
+# have added startup diagnostics there.
 # -----------------------------------------------------------------------------
 
-rpc_error_anchor = "\tcase 0x2144ca19: { // rpc_error\n"
+rpc_error_case = "\tcase 0x2144ca19: { // rpc_error\n"
+rpc_error_read = (
+    "\t\tread_string(unenc_response + 8, error_message);"
+)
 
 if "message_search_handle_rpc_error(error_code" not in s:
-    replacement = (
-        rpc_error_anchor +
-        "\t\tint error_code = read_le(unenc_response + 4, 4);\n"
-        "\t\twchar_t error_message[50];\n"
-        "\t\tread_string(unenc_response + 8, error_message);\n"
+
+    case_pos = s.find(rpc_error_case)
+
+    if case_pos < 0:
+        raise SystemExit(
+            "Could not locate rpc_error case in response.cpp"
+        )
+
+    # Make sure we find read_string inside this rpc_error case,
+    # not somewhere later in response.cpp.
+    next_case_pos = s.find(
+        "\n\tcase ",
+        case_pos + len(rpc_error_case)
+    )
+
+    read_pos = s.find(
+        rpc_error_read,
+        case_pos
+    )
+
+    if (
+        read_pos < 0 or
+        (
+            next_case_pos >= 0 and
+            read_pos >= next_case_pos
+        )
+    ):
+        raise SystemExit(
+            "Could not locate rpc_error read_string in response.cpp"
+        )
+
+    insert_pos = (
+        read_pos +
+        len(rpc_error_read)
+    )
+
+    search_rpc_error_hook = (
+        "\n"
         "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {\n"
-        "\t\t\tmessage_search_handle_rpc_error(error_code, error_message);\n"
+        "\t\t\tmessage_search_handle_rpc_error(\n"
+        "\t\t\t\terror_code,\n"
+        "\t\t\t\terror_message\n"
+        "\t\t\t);\n"
         "\t\t\tbreak;\n"
         "\t\t}\n"
     )
 
-    old = (
-        rpc_error_anchor +
-        "\t\tint error_code = read_le(unenc_response + 4, 4);\n"
-        "\t\twchar_t error_message[50];\n"
-        "\t\tread_string(unenc_response + 8, error_message);\n"
+    s = (
+        s[:insert_pos] +
+        search_rpc_error_hook +
+        s[insert_pos:]
     )
-
-    if old not in s:
-        raise SystemExit("Could not locate rpc_error prologue in response.cpp")
-
-    s = s.replace(old, replacement, 1)
 
 
 # -----------------------------------------------------------------------------
