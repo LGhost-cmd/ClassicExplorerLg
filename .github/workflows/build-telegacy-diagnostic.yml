@@ -41,6 +41,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_search_media.py" "telegacy-src"
 
+      - name: Upgrade message search to server search
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_server_search.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
