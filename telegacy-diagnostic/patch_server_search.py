@@ -69,13 +69,20 @@ write(h, s)
 
 s = read(t)
 
-start_marker = "static LONG message_search_position = 0;"
-end_marker = "static HBITMAP media_archive_make_thumbnail("
+position_marker = "static LONG message_search_position = 0;"
+local_search_start_marker = "static bool message_search_range_is_body("
+local_search_end_marker = "static HBITMAP media_archive_make_thumbnail("
 
-start = s.find(start_marker)
-end = s.find(end_marker)
+position_pos = s.find(position_marker)
+local_start = s.find(local_search_start_marker)
+local_end = s.find(local_search_end_marker)
 
-if start < 0 or end < 0 or end <= start:
+if (
+    position_pos < 0 or
+    local_start < 0 or
+    local_end < 0 or
+    local_end <= local_start
+):
     if "message_search_send_request" not in s:
         raise SystemExit(
             "Could not locate local message-search implementation. "
@@ -455,14 +462,30 @@ void message_search_handle_rpc_error(
 
 '''
 
-    s = s[:start] + server_search_impl + s[end:]
+    # Preserve MediaArchiveItem and all media archive globals which sit
+    # between message_search_position and the old local-search functions.
+    s = s.replace(
+        position_marker,
+        server_search_impl,
+        1
+    )
+
+    local_start = s.find(local_search_start_marker)
+    local_end = s.find(local_search_end_marker)
+
+    if local_start < 0 or local_end < 0 or local_end <= local_start:
+        raise SystemExit(
+            "Could not isolate old local message-search helper functions"
+        )
+
+    s = s[:local_start] + s[local_end:]
 
 
 # -----------------------------------------------------------------------------
 # Replace the local search WM_COMMAND handlers.
 # -----------------------------------------------------------------------------
 
-old_handlers = r'''\t\tcase 31: { // message search
+old_handlers = r'''\t\tcase 3001: { // message search
 \t\t\tif (HIWORD(wParam) == EN_CHANGE) {
 \t\t\t\tmessage_search_position = 0;
 \t\t\t\tmessage_search_find(false);
@@ -470,18 +493,18 @@ old_handlers = r'''\t\tcase 31: { // message search
 \t\t\tbreak;
 \t\t}
 
-\t\tcase 32: { // previous message-search result
+\t\tcase 3002: { // previous message-search result
 \t\t\tmessage_search_find(true);
 \t\t\tbreak;
 \t\t}
 
-\t\tcase 33: { // next message-search result
+\t\tcase 3003: { // next message-search result
 \t\t\tmessage_search_find(false);
 \t\t\tbreak;
 \t\t}
 '''.replace('\\t', '\t')
 
-new_handlers = r'''\t\tcase 31: { // server-side message search
+new_handlers = r'''\t\tcase 3001: { // server-side message search
 \t\t\tif (HIWORD(wParam) != EN_CHANGE)
 \t\t\t\tbreak;
 
@@ -511,12 +534,12 @@ new_handlers = r'''\t\tcase 31: { // server-side message search
 \t\t\tbreak;
 \t\t}
 
-\t\tcase 32: { // newer server-search page
+\t\tcase 3002: { // newer server-search page
 \t\t\tmessage_search_newer_page();
 \t\t\tbreak;
 \t\t}
 
-\t\tcase 33: { // older server-search page
+\t\tcase 3003: { // older server-search page
 \t\t\tmessage_search_older_page();
 \t\t\tbreak;
 \t\t}
@@ -524,7 +547,7 @@ new_handlers = r'''\t\tcase 31: { // server-side message search
 
 if old_handlers in s:
     s = s.replace(old_handlers, new_handlers, 1)
-elif "case 31: { // server-side message search" not in s:
+elif "case 3001: { // server-side message search" not in s:
     raise SystemExit("Could not locate local message-search WM_COMMAND handlers")
 
 
