@@ -424,9 +424,11 @@ static void media_archive_refresh() {
 
         item.pszText = label;
 
-        ListView_InsertItemW(
+        SendMessageW(
             hMediaArchiveList,
-            &item
+            LVM_INSERTITEMW,
+            0,
+            (LPARAM)&item
         );
     }
 }
@@ -558,9 +560,11 @@ static LRESULT CALLBACK TelegacyMediaArchiveWindow(
                     item.iItem = index;
 
                     if (
-                        ListView_GetItemW(
+                        SendMessageW(
                             hMediaArchiveList,
-                            &item
+                            LVM_GETITEMW,
+                            0,
+                            (LPARAM)&item
                         )
                     ) {
                         media_archive_jump_to_message(
@@ -803,7 +807,7 @@ if "hMessageSearch = CreateWindowExW(" not in s:
 			width - 205,
 			22,
 			hWnd,
-			(HMENU)31,
+			(HMENU)3001,
 			NULL,
 			NULL
 		);
@@ -817,7 +821,7 @@ if "hMessageSearch = CreateWindowExW(" not in s:
 			45,
 			22,
 			hWnd,
-			(HMENU)32,
+			(HMENU)3002,
 			NULL,
 			NULL
 		);
@@ -831,7 +835,7 @@ if "hMessageSearch = CreateWindowExW(" not in s:
 			45,
 			22,
 			hWnd,
-			(HMENU)33,
+			(HMENU)3003,
 			NULL,
 			NULL
 		);
@@ -845,7 +849,7 @@ if "hMessageSearch = CreateWindowExW(" not in s:
 			80,
 			22,
 			hWnd,
-			(HMENU)34,
+			(HMENU)3004,
 			NULL,
 			NULL
 		);
@@ -914,14 +918,14 @@ elif new_chat_create not in s:
 # WM_COMMAND handlers: live search, previous, next, media archive
 # -----------------------------------------------------------------------------
 
-if "case 31: { // message search" not in s:
+if "case 3001: { // message search" not in s:
     anchor = (
         "\t\tcase 3: {\n"
         "\t\t\tif (nt3 && HIWORD(wParam) == CBN_DROPDOWN) "
         "nt3_combobox_fit(hComboBoxChats);"
     )
 
-    handlers = r'''		case 31: { // message search
+    handlers = r'''		case 3001: { // message search
 			if (HIWORD(wParam) == EN_CHANGE) {
 				message_search_position = 0;
 				message_search_find(false);
@@ -929,17 +933,17 @@ if "case 31: { // message search" not in s:
 			break;
 		}
 
-		case 32: { // previous message-search result
+		case 3002: { // previous message-search result
 			message_search_find(true);
 			break;
 		}
 
-		case 33: { // next message-search result
+		case 3003: { // next message-search result
 			message_search_find(false);
 			break;
 		}
 
-		case 34: { // media archive
+		case 3004: { // media archive
 			media_archive_show();
 			break;
 		}
