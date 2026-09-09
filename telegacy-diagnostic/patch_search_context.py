@@ -1070,7 +1070,7 @@ if "hMessageSearchStatus = CreateWindowW(" not in s:
 			65,
 			22,
 			hWnd,
-			(HMENU)35,
+			(HMENU)3005,
 			NULL,
 			NULL
 		);
