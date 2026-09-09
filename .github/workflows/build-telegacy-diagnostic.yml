@@ -46,6 +46,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_server_search.py" "telegacy-src"
 
+      - name: Add Telegram-style search context
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_search_context.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
