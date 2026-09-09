@@ -377,6 +377,83 @@ write(t, s)
 # ----- src/response.cpp -----
 s = read(r)
 
+# ----- Diagnose startup rpc_result / rpc_error / getDifference -----
+
+# Log every rpc_result and whether it belongs to updates.getDifference.
+old = """\tcase 0xf35c6d01: { // rpc_result
+\t\tif (memcmp(last_rpcresult_msgid, unenc_response + 4, 8) == 0) break;"""
+
+new = """\tcase 0xf35c6d01: { // rpc_result
+\t\tbool diag_is_difference =
+\t\t\tmemcmp(unenc_response + 4, difference_msg_id, 8) == 0;
+
+\t\tdiag_log(
+\t\t\t"rpc_result id=%08X%08X difference_id=%08X%08X match=%d nested_ctor=0x%08X",
+\t\t\t(unsigned int)read_le(unenc_response + 8, 4),
+\t\t\t(unsigned int)read_le(unenc_response + 4, 4),
+\t\t\t(unsigned int)read_le(difference_msg_id + 4, 4),
+\t\t\t(unsigned int)read_le(difference_msg_id, 4),
+\t\t\tdiag_is_difference ? 1 : 0,
+\t\t\tlength >= 16
+\t\t\t\t? (unsigned int)read_le(unenc_response + 12, 4)
+\t\t\t\t: 0
+\t\t);
+
+\t\tif (memcmp(last_rpcresult_msgid, unenc_response + 4, 8) == 0) break;"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate rpc_result handler for startup diagnostics"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# Log rpc_error code/text and identify whether the failed RPC was getDifference.
+old = """\tcase 0x2144ca19: { // rpc_error
+\t\tint error_code = read_le(unenc_response + 4, 4);
+\t\twchar_t error_message[50];
+\t\tread_string(unenc_response + 8, error_message);"""
+
+new = """\tcase 0x2144ca19: { // rpc_error
+\t\tint error_code = read_le(unenc_response + 4, 4);
+\t\twchar_t error_message[50] = {0};
+\t\tread_string(unenc_response + 8, error_message);
+
+\t\tchar error_message_utf8[256] = {0};
+
+\t\tWideCharToMultiByte(
+\t\t\tCP_UTF8,
+\t\t\t0,
+\t\t\terror_message,
+\t\t\t-1,
+\t\t\terror_message_utf8,
+\t\t\tsizeof(error_message_utf8),
+\t\t\tNULL,
+\t\t\tNULL
+\t\t);
+
+\t\tbool diag_error_is_difference =
+\t\t\tmemcmp(last_rpcresult_msgid, difference_msg_id, 8) == 0;
+
+\t\tdiag_log(
+\t\t\t"rpc_error code=%d message=%s rpc_id=%08X%08X difference_id=%08X%08X match=%d",
+\t\t\terror_code,
+\t\t\terror_message_utf8,
+\t\t\t(unsigned int)read_le(last_rpcresult_msgid + 4, 4),
+\t\t\t(unsigned int)read_le(last_rpcresult_msgid, 4),
+\t\t\t(unsigned int)read_le(difference_msg_id + 4, 4),
+\t\t\t(unsigned int)read_le(difference_msg_id, 4),
+\t\t\tdiag_error_is_difference ? 1 : 0
+\t\t);"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate rpc_error handler for startup diagnostics"
+    )
+
+s = s.replace(old, new, 1)
+
 # ----- Diagnostic logging for upload.file -----
 
 old = "\tcase 0x96a18d5: { // upload.file\n"
