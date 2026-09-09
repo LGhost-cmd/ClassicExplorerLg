@@ -1667,9 +1667,10 @@ if "static void message_search_handle_context_response(" not in s:
 # -----------------------------------------------------------------------------
 # Route messages.Messages-family RPCs to context before search/history.
 #
-# Scope the search to the messages.Messages switch case. The same
-# message_search_matches_rpc(...) condition is also used in rpc_error, so a
-# global s.find() can insert the context handler into the wrong case.
+# Find the actual CALL to message_search_handle_server_response(), then walk
+# backwards to the condition that owns that call. This is robust across the
+# fall-through family of several consecutive `case` labels:
+#   messages.messagesSlice / messages.channelMessages / messages.Messages.
 # -----------------------------------------------------------------------------
 
 context_route = (
@@ -1685,47 +1686,35 @@ context_route = (
 )
 
 if context_route not in s:
-    messages_case_candidates = [
-        "\tcase 0x5f206716:",
-        "\tcase 0x3a54685e:",
-        "\tcase 0xc776ba4e:",
-        "\tcase 0x8c718e87:",
-    ]
-
-    messages_case_pos = -1
-
-    for marker in messages_case_candidates:
-        pos = s.find(marker)
-        if pos >= 0 and (
-            messages_case_pos < 0 or
-            pos < messages_case_pos
-        ):
-            messages_case_pos = pos
-
-    if messages_case_pos < 0:
-        raise SystemExit(
-            "Could not locate messages.Messages switch case."
-        )
-
-    next_case_pos = s.find(
-        "\n\tcase ",
-        messages_case_pos + 1
+    search_call = (
+        "\t\t\tmessage_search_handle_server_response(\n"
     )
 
-    search_route_pos = s.find(
-        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {",
-        messages_case_pos
+    call_pos = s.find(search_call)
+
+    if call_pos < 0:
+        raise SystemExit(
+            "Could not locate message_search_handle_server_response() call "
+            "in response.cpp."
+        )
+
+    route_condition = (
+        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {"
+    )
+
+    search_route_pos = s.rfind(
+        route_condition,
+        0,
+        call_pos
     )
 
     if (
         search_route_pos < 0 or
-        (
-            next_case_pos >= 0 and
-            search_route_pos >= next_case_pos
-        )
+        call_pos - search_route_pos > 1200
     ):
         raise SystemExit(
-            "Could not locate server-search response route inside messages.Messages."
+            "Could not associate messages.search response call with its "
+            "message_search_matches_rpc() route."
         )
 
     s = (
@@ -1738,9 +1727,8 @@ if context_route not in s:
 # -----------------------------------------------------------------------------
 # Route context rpc_error as well.
 #
-# Do not match the formatting of message_search_handle_rpc_error(...).
-# patch_server_search.py may emit it on one line or on several lines depending
-# on which diagnostic patches ran before it.
+# Again, key off the actual server-search error-handler CALL instead of the
+# exact formatting of the surrounding block.
 # -----------------------------------------------------------------------------
 
 rpc_context = (
@@ -1754,33 +1742,33 @@ rpc_context = (
 )
 
 if rpc_context not in s:
-    rpc_case = "\tcase 0x2144ca19: { // rpc_error\n"
-    rpc_case_pos = s.find(rpc_case)
+    error_call = "message_search_handle_rpc_error("
 
-    if rpc_case_pos < 0:
+    call_pos = s.find(error_call)
+
+    if call_pos < 0:
         raise SystemExit(
-            "Could not locate rpc_error case in response.cpp."
+            "Could not locate message_search_handle_rpc_error() call "
+            "in response.cpp."
         )
 
-    next_case_pos = s.find(
-        "\n\tcase ",
-        rpc_case_pos + len(rpc_case)
+    route_condition = (
+        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {"
     )
 
-    search_route_pos = s.find(
-        "\t\tif (message_search_matches_rpc(last_rpcresult_msgid)) {",
-        rpc_case_pos
+    search_route_pos = s.rfind(
+        route_condition,
+        0,
+        call_pos
     )
 
     if (
         search_route_pos < 0 or
-        (
-            next_case_pos >= 0 and
-            search_route_pos >= next_case_pos
-        )
+        call_pos - search_route_pos > 1200
     ):
         raise SystemExit(
-            "Could not locate server-search rpc_error route inside rpc_error case."
+            "Could not associate messages.search rpc_error call with its "
+            "message_search_matches_rpc() route."
         )
 
     s = (
