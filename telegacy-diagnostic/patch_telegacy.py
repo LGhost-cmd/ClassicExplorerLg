@@ -377,6 +377,13 @@ write(t, s)
 # ----- src/response.cpp -----
 s = read(r)
 
+diag_log(
+    "upload.file state downloads=%d documents=%d custom_emoji=%d",
+    (int)downloading_docs.size(),
+    (int)documents.size(),
+    (int)rces.size()
+);
+
 old = "\tunsigned int constructor = read_le(unenc_response, 4);\n\tswitch (constructor) {"
 new = (
     "\tunsigned int constructor = read_le(unenc_response, 4);\n"
@@ -551,6 +558,79 @@ new = """\t\tif (!current_peer || neworrep || memcmp(unenc_response + offset2, c
 
 if old not in s:
     raise SystemExit("Could not locate history peer mismatch exit")
+
+s = s.replace(old, new, 1)
+
+# ----- Harden custom emoji file saving -----
+
+old = """\t\t\tFILE* f = _wfopen(path, L"wb");
+\t\t\tfwrite(&dir, sizeof(ICONDIR), 1, f);
+\t\t\tfwrite(&entry, sizeof(ICONDIRENTRY), 1, f);
+\t\t\tfwrite(&bih, sizeof(BITMAPINFOHEADER), 1, f);
+\t\t\tfwrite(bmpBits, 1, bmpSize, f);
+\t\t\tfwrite(maskBits, 1, maskSize, f);
+\t\t\tfclose(f);"""
+
+new = """\t\t\t// Make sure the custom emoji cache directory exists.
+\t\t\twchar_t customEmojiDir[MAX_PATH];
+\t\t\twcscpy(
+\t\t\t\tcustomEmojiDir,
+\t\t\t\tget_path(appdata_path, L"custom_emojis")
+\t\t\t);
+
+\t\t\tCreateDirectoryW(customEmojiDir, NULL);
+
+\t\t\tFILE* f = _wfopen(path, L"wb");
+
+\t\t\tif (!f) {
+\t\t\t\tdiag_log(
+\t\t\t\t\t"custom emoji file open failed id=%I64d error=%d",
+\t\t\t\t\trces[0].id,
+\t\t\t\t\terrno
+\t\t\t\t);
+
+\t\t\t\tfree(bmpBits);
+\t\t\t\tfree(maskBits);
+\t\t\t\tWebPFreeDecBuffer(&config.output);
+
+\t\t\t\trces.erase(rces.begin());
+
+\t\t\t\tif (rces.size())
+\t\t\t\t\tget_photo(&rces[0], NULL, &dcInfoMain);
+
+\t\t\t\tbreak;
+\t\t\t}
+
+\t\t\tfwrite(&dir, sizeof(ICONDIR), 1, f);
+\t\t\tfwrite(&entry, sizeof(ICONDIRENTRY), 1, f);
+\t\t\tfwrite(&bih, sizeof(BITMAPINFOHEADER), 1, f);
+\t\t\tfwrite(bmpBits, 1, bmpSize, f);
+\t\t\tfwrite(maskBits, 1, maskSize, f);
+
+\t\t\tfclose(f);"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate custom emoji ICO writer in response.cpp"
+    )
+
+s = s.replace(old, new, 1)
+
+old = """\t\t\t\tif (memcmp(current_peer->id, rces[0].ceps[0].peer_id, 8) == 0) {"""
+
+new = """\t\t\t\tif (
+\t\t\t\t\tcurrent_peer &&
+\t\t\t\t\tmemcmp(
+\t\t\t\t\t\tcurrent_peer->id,
+\t\t\t\t\t\trces[0].ceps[0].peer_id,
+\t\t\t\t\t\t8
+\t\t\t\t\t) == 0
+\t\t\t\t) {"""
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate custom emoji current_peer comparison"
+    )
 
 s = s.replace(old, new, 1)
 
@@ -987,6 +1067,399 @@ s = s.replace(old, new, 1)
 
 
 # IMPORTANT: save all telegacy.cpp changes
+write(t, s)
+
+# ----- src/telegacy.cpp: chat/channel search -----
+s = read(t)
+
+# ------------------------------------------------------------
+# Search helpers
+# ------------------------------------------------------------
+
+anchor = "int lang_codepage = 0;\n"
+
+search_helpers = r'''
+HWND hChatSearch = NULL;
+bool chat_search_updating = false;
+
+static bool chat_name_contains(
+    const wchar_t* name,
+    const wchar_t* query
+) {
+    if (!query || !query[0])
+        return true;
+
+    if (!name || !name[0])
+        return false;
+
+    int name_len = lstrlenW(name);
+    int query_len = lstrlenW(query);
+
+    if (query_len > name_len)
+        return false;
+
+    for (int i = 0; i <= name_len - query_len; i++) {
+        if (
+            CompareStringW(
+                LOCALE_USER_DEFAULT,
+                NORM_IGNORECASE,
+                name + i,
+                query_len,
+                query,
+                query_len
+            ) == CSTR_EQUAL
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void rebuild_chat_combo_by_name(
+    const wchar_t* query
+) {
+    if (!hComboBoxChats)
+        return;
+
+    SendMessage(
+        hComboBoxChats,
+        CB_RESETCONTENT,
+        0,
+        0
+    );
+
+    if (!current_folder)
+        return;
+
+    for (int i = 0; i < current_folder->count; i++) {
+        Peer* peer =
+            &peers[current_folder->peers[i]];
+
+        if (!peer || !peer->name)
+            continue;
+
+        if (!chat_name_contains(peer->name, query))
+            continue;
+
+        LRESULT item = SendMessage(
+            hComboBoxChats,
+            CB_ADDSTRING,
+            0,
+            (LPARAM)peer->name
+        );
+
+        if (
+            item != CB_ERR &&
+            item != CB_ERRSPACE
+        ) {
+            SendMessage(
+                hComboBoxChats,
+                CB_SETITEMDATA,
+                item,
+                (LPARAM)peer
+            );
+        }
+    }
+}
+'''
+
+if "rebuild_chat_combo_by_name" not in s:
+    if anchor not in s:
+        raise SystemExit(
+            "Could not locate lang_codepage anchor"
+        )
+
+    s = s.replace(
+        anchor,
+        anchor + search_helpers,
+        1
+    )
+
+
+# ------------------------------------------------------------
+# Add the search edit box to the top bar
+# ------------------------------------------------------------
+
+old = '''\
+\t\thComboBoxFolders = CreateWindow(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_OWNERDRAWFIXED, 10, 10, 200, 300, hWnd, (HMENU)2, NULL, NULL);
+\t\thComboBoxChats = CreateWindow(L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_OWNERDRAWFIXED, 220, 10, width / 2.5, 300, hWnd, (HMENU)3, NULL, NULL);'''
+
+new = '''\
+\t\thComboBoxFolders = CreateWindow(
+\t\t\tL"COMBOBOX",
+\t\t\tL"",
+\t\t\tCBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE |
+\t\t\tWS_VSCROLL | CBS_OWNERDRAWFIXED,
+\t\t\t10, 10, 115, 300,
+\t\t\thWnd,
+\t\t\t(HMENU)2,
+\t\t\tNULL,
+\t\t\tNULL
+\t\t);
+
+\t\thChatSearch = CreateWindowExW(
+\t\t\tWS_EX_CLIENTEDGE,
+\t\t\tL"EDIT",
+\t\t\tL"",
+\t\t\tWS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+\t\t\t130, 10, 130, 22,
+\t\t\thWnd,
+\t\t\t(HMENU)30,
+\t\t\tNULL,
+\t\t\tNULL
+\t\t);
+
+\t\thComboBoxChats = CreateWindow(
+\t\t\tL"COMBOBOX",
+\t\t\tL"",
+\t\t\tCBS_DROPDOWNLIST | WS_CHILD | WS_VISIBLE |
+\t\t\tWS_VSCROLL | CBS_OWNERDRAWFIXED,
+\t\t\t265, 10, width - 275, 300,
+\t\t\thWnd,
+\t\t\t(HMENU)3,
+\t\t\tNULL,
+\t\t\tNULL
+\t\t);'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate chat/folder combobox creation"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------
+# Folder change: clear search and rebuild complete list
+# ------------------------------------------------------------
+
+old = '''\
+\t\t\tSendMessage(hComboBoxChats, CB_RESETCONTENT, 0, 0);
+\t\t\tcurrent_folder = (ChatsFolder*)SendMessage(hComboBoxFolders, CB_GETITEMDATA, selIndex, 0);
+\t\t\tfor (int i = 0; i < current_folder->count; i++) {
+\t\t\t\tSendMessage(hComboBoxChats, CB_ADDSTRING, 0, (LPARAM)peers[current_folder->peers[i]].name);
+\t\t\t\tSendMessage(hComboBoxChats, CB_SETITEMDATA, i, (LPARAM)&peers[current_folder->peers[i]]);
+\t\t\t}'''
+
+new = '''\
+\t\t\tcurrent_folder = (ChatsFolder*)SendMessage(
+\t\t\t\thComboBoxFolders,
+\t\t\t\tCB_GETITEMDATA,
+\t\t\t\tselIndex,
+\t\t\t\t0
+\t\t\t);
+
+\t\t\tchat_search_updating = true;
+\t\t\tSetWindowTextW(hChatSearch, L"");
+\t\t\tchat_search_updating = false;
+
+\t\t\trebuild_chat_combo_by_name(L"");'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate folder chat-list rebuild"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------
+# Search box EN_CHANGE
+# ------------------------------------------------------------
+
+old = '''\
+\t\tcase 3: {
+\t\t\tif (nt3 && HIWORD(wParam) == CBN_DROPDOWN) nt3_combobox_fit(hComboBoxChats);'''
+
+new = '''\
+\t\tcase 30: {
+\t\t\tif (
+\t\t\t\tHIWORD(wParam) != EN_CHANGE ||
+\t\t\t\tchat_search_updating
+\t\t\t) {
+\t\t\t\tbreak;
+\t\t\t}
+
+\t\t\twchar_t query[256] = {0};
+
+\t\t\tGetWindowTextW(
+\t\t\t\thChatSearch,
+\t\t\t\tquery,
+\t\t\t\t256
+\t\t\t);
+
+\t\t\trebuild_chat_combo_by_name(query);
+
+\t\t\tbreak;
+\t\t}
+
+\t\tcase 3: {
+\t\t\tif (nt3 && HIWORD(wParam) == CBN_DROPDOWN) nt3_combobox_fit(hComboBoxChats);'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate chat combobox WM_COMMAND handler"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------
+# Selection must use CB item data after filtering
+# ------------------------------------------------------------
+
+old = '''\
+\t\t\tint selIndex = SendMessage(hComboBoxChats, CB_GETCURSEL, 0, 0);
+\t\t\tSetFocus(msgInput);
+\t\t\tif (selIndex == - 1 || (lParam && current_peer == &peers[current_folder->peers[selIndex]])) break;'''
+
+new = '''\
+\t\t\tint selIndex = SendMessage(
+\t\t\t\thComboBoxChats,
+\t\t\t\tCB_GETCURSEL,
+\t\t\t\t0,
+\t\t\t\t0
+\t\t\t);
+
+\t\t\tSetFocus(msgInput);
+
+\t\t\tif (selIndex == -1)
+\t\t\t\tbreak;
+
+\t\t\tPeer* selected_peer = (Peer*)SendMessage(
+\t\t\t\thComboBoxChats,
+\t\t\t\tCB_GETITEMDATA,
+\t\t\t\tselIndex,
+\t\t\t\t0
+\t\t\t);
+
+\t\t\tif (
+\t\t\t\t!selected_peer ||
+\t\t\t\tselected_peer == (Peer*)CB_ERR
+\t\t\t) {
+\t\t\t\tbreak;
+\t\t\t}
+
+\t\t\tif (
+\t\t\t\tlParam &&
+\t\t\t\tcurrent_peer == selected_peer
+\t\t\t) {
+\t\t\t\tbreak;
+\t\t\t}'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate chat selection header"
+    )
+
+s = s.replace(old, new, 1)
+
+old = '''\
+\t\t\tcurrent_peer = (Peer*)SendMessage(hComboBoxChats, CB_GETITEMDATA, selIndex, 0);'''
+
+new = '''\
+\t\t\tcurrent_peer = selected_peer;'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate current_peer assignment"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------
+# Owner draw must also use filtered item data
+# ------------------------------------------------------------
+
+old = '''\
+\t\t\tif (lpdis->hwndItem == hComboBoxChats) {
+\t\t\t\tif (lpdis->itemID == -1 && !current_peer) break;
+\t\t\t\tpeer = lpdis->itemID == -1 ? current_peer : &peers[current_folder->peers[lpdis->itemID]];
+\t\t\t\tif (!peer) break;
+\t\t\t\tname = peer->name;
+\t\t\t} else {'''
+
+new = '''\
+\t\t\tif (lpdis->hwndItem == hComboBoxChats) {
+\t\t\t\tif (lpdis->itemID == -1) {
+\t\t\t\t\tpeer = current_peer;
+\t\t\t\t} else {
+\t\t\t\t\tLRESULT data = SendMessage(
+\t\t\t\t\t\thComboBoxChats,
+\t\t\t\t\t\tCB_GETITEMDATA,
+\t\t\t\t\t\tlpdis->itemID,
+\t\t\t\t\t\t0
+\t\t\t\t\t);
+
+\t\t\t\t\tif (data != CB_ERR)
+\t\t\t\t\t\tpeer = (Peer*)data;
+\t\t\t\t}
+
+\t\t\t\tif (!peer)
+\t\t\t\t\tbreak;
+
+\t\t\t\tname = peer->name;
+\t\t\t} else {'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate chat owner-draw block"
+    )
+
+s = s.replace(old, new, 1)
+
+
+# ------------------------------------------------------------
+# Resize the three top controls
+# ------------------------------------------------------------
+
+old = '''\
+\t\t\thdwp = DeferWindowPos(hdwp, hComboBoxChats, NULL, NULL, NULL, width / 2.5, 300, SWP_NOZORDER | SWP_NOMOVE);'''
+
+new = '''\
+\t\t\thdwp = DeferWindowPos(
+\t\t\t\thdwp,
+\t\t\t\thComboBoxFolders,
+\t\t\t\tNULL,
+\t\t\t\t10,
+\t\t\t\t10,
+\t\t\t\t115,
+\t\t\t\t300,
+\t\t\t\tSWP_NOZORDER
+\t\t\t);
+
+\t\t\thdwp = DeferWindowPos(
+\t\t\t\thdwp,
+\t\t\t\thChatSearch,
+\t\t\t\tNULL,
+\t\t\t\t130,
+\t\t\t\t10,
+\t\t\t\t130,
+\t\t\t\t22,
+\t\t\t\tSWP_NOZORDER
+\t\t\t);
+
+\t\t\thdwp = DeferWindowPos(
+\t\t\t\thdwp,
+\t\t\t\thComboBoxChats,
+\t\t\t\tNULL,
+\t\t\t\t265,
+\t\t\t\t10,
+\t\t\t\twidth - 275,
+\t\t\t\t300,
+\t\t\t\tSWP_NOZORDER
+\t\t\t);'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate chat combobox resize"
+    )
+
+s = s.replace(old, new, 1)
+
+
 write(t, s)
 
 # ----- src/conversions.cpp -----
