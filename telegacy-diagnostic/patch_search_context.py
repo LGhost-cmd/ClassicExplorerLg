@@ -976,23 +976,23 @@ elif "wParam == 32" not in s[
 # Change arrow handlers from page navigation to hit navigation.
 # -----------------------------------------------------------------------------
 
-old_handlers = r'''		case 32: { // newer server-search page
+old_handlers = r'''		case 3002: { // newer server-search page
 			message_search_newer_page();
 			break;
 		}
 
-		case 33: { // older server-search page
+		case 3003: { // older server-search page
 			message_search_older_page();
 			break;
 		}
 '''
 
-new_handlers = r'''		case 32: { // previous search result
+new_handlers = r'''		case 3002: { // previous search result
 			message_search_previous_result();
 			break;
 		}
 
-		case 33: { // next search result
+		case 3003: { // next search result
 			message_search_next_result();
 			break;
 		}
@@ -1071,7 +1071,7 @@ if "hMessageSearchStatus = CreateWindowW(" not in s:
 			65,
 			22,
 			hWnd,
-			(HMENU)35,
+			(HMENU)3005,
 			NULL,
 			NULL
 		);
