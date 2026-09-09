@@ -35,6 +35,11 @@ jobs:
         shell: pwsh
         run: |
           python "telegacy-diagnostic\patch_telegacy.py" "telegacy-src"
+          
+      - name: Fix chat search command ID
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_chat_search_id_fix.py" "telegacy-src"
 
       - name: Add chat search and media archive
         shell: pwsh
