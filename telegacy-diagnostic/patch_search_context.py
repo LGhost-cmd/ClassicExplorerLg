@@ -975,27 +975,26 @@ elif "wParam == 32" not in s[
 # -----------------------------------------------------------------------------
 # Change arrow handlers from page navigation to hit navigation.
 # -----------------------------------------------------------------------------
+old_handlers = r'''\t\tcase 3002: { // newer server-search page
+\t\t\tmessage_search_newer_page();
+\t\t\tbreak;
+\t\t}
 
-old_handlers = r'''		case 32: { // newer server-search page
-			message_search_newer_page();
-			break;
-		}
-
-		case 33: { // older server-search page
-			message_search_older_page();
-			break;
-		}
+\t\tcase 3003: { // older server-search page
+\t\t\tmessage_search_older_page();
+\t\t\tbreak;
+\t\t}
 '''
 
-new_handlers = r'''		case 32: { // previous search result
-			message_search_previous_result();
-			break;
-		}
+new_handlers = r'''\t\tcase 3002: { // previous search result
+\t\t\tmessage_search_previous_result();
+\t\t\tbreak;
+\t\t}
 
-		case 33: { // next search result
-			message_search_next_result();
-			break;
-		}
+\t\tcase 3003: { // next search result
+\t\t\tmessage_search_next_result();
+\t\t\tbreak;
+\t\t}
 '''
 
 if old_handlers in s:
