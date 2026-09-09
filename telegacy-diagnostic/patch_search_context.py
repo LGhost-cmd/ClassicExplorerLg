@@ -974,38 +974,34 @@ elif "wParam == 32" not in s[
 
 # -----------------------------------------------------------------------------
 # Change arrow handlers from page navigation to hit navigation.
+#
+# Do not depend on case comments, indentation, or the exact command ID text.
+# patch_server_search.py already owns the command IDs; here we only replace
+# the two function calls inside those handlers.
 # -----------------------------------------------------------------------------
-old_handlers = r'''\t\tcase 3002: { // newer server-search page
-\t\t\tmessage_search_newer_page();
-\t\t\tbreak;
-\t\t}
 
-\t\tcase 3003: { // older server-search page
-\t\t\tmessage_search_older_page();
-\t\t\tbreak;
-\t\t}
-'''
+if "message_search_previous_result();" not in s:
+    if "message_search_newer_page();" not in s:
+        raise SystemExit(
+            "Could not locate server-search previous-page call in telegacy.cpp"
+        )
 
-new_handlers = r'''\t\tcase 3002: { // previous search result
-\t\t\tmessage_search_previous_result();
-\t\t\tbreak;
-\t\t}
-
-\t\tcase 3003: { // next search result
-\t\t\tmessage_search_next_result();
-\t\t\tbreak;
-\t\t}
-'''
-
-if old_handlers in s:
     s = s.replace(
-        old_handlers,
-        new_handlers,
+        "message_search_newer_page();",
+        "message_search_previous_result();",
         1
     )
-elif "message_search_previous_result();" not in s:
-    raise SystemExit(
-        "Could not locate server-search arrow handlers."
+
+if "message_search_next_result();" not in s:
+    if "message_search_older_page();" not in s:
+        raise SystemExit(
+            "Could not locate server-search next-page call in telegacy.cpp"
+        )
+
+    s = s.replace(
+        "message_search_older_page();",
+        "message_search_next_result();",
+        1
     )
 
 
