@@ -228,6 +228,121 @@ if "DiagnosticBootstrap" not in s:
     if include_anchor not in s:
         raise SystemExit("Could not locate include anchor in telegacy.cpp")
     s = s.replace(include_anchor, include_anchor + "\n" + diag_impl, 1)
+
+# ------------------------------------------------------------------
+# Downloads: always use the user's Downloads\Telegram directory
+# ------------------------------------------------------------------
+
+old = r'''\twchar_t download_path[MAX_PATH];
+\tGetPrivateProfileString(L"General", L"download_path", L"", download_path, MAX_PATH, appdata_path);
+\tif (!download_path[0]) {
+\t\tHKEY hKey;
+\t\tif (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Folders", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+\t\t\tDWORD type = REG_SZ;
+\t\t\tDWORD size = MAX_PATH;
+\t\t\tif (RegQueryValueEx(hKey, L"Desktop", NULL, &type, (LPBYTE)download_path, &size) != ERROR_SUCCESS) wcscpy(download_path, L"C:\\");
+\t\t\tRegCloseKey(hKey);
+\t\t}
+\t}
+\tSetCurrentDirectory(download_path);'''
+
+new = r'''\twchar_t download_path[MAX_PATH] = {0};
+\twchar_t downloads_root[MAX_PATH] = {0};
+
+\t// Windows stores the user's Downloads known-folder path here.
+\t// Using User Shell Folders also respects a relocated Downloads folder.
+\tHKEY hKey;
+
+\tif (RegOpenKeyExW(
+\t\tHKEY_CURRENT_USER,
+\t\tL"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\User Shell Folders",
+\t\t0,
+\t\tKEY_READ,
+\t\t&hKey
+\t) == ERROR_SUCCESS) {
+
+\t\tDWORD type = 0;
+\t\tDWORD size = sizeof(downloads_root);
+
+\t\tif (RegQueryValueExW(
+\t\t\thKey,
+\t\t\tL"{374DE290-123F-4565-9164-39C4925E467B}",
+\t\t\tNULL,
+\t\t\t&type,
+\t\t\t(LPBYTE)downloads_root,
+\t\t\t&size
+\t\t) != ERROR_SUCCESS) {
+\t\t\tdownloads_root[0] = 0;
+\t\t}
+
+\t\tRegCloseKey(hKey);
+\t}
+
+\t// User Shell Folders normally stores REG_EXPAND_SZ values such as
+\t// %USERPROFILE%\\Downloads.
+\tif (downloads_root[0]) {
+\t\twchar_t expanded[MAX_PATH] = {0};
+
+\t\tif (ExpandEnvironmentStringsW(
+\t\t\tdownloads_root,
+\t\t\texpanded,
+\t\t\tMAX_PATH
+\t\t) > 0) {
+\t\t\twcscpy(downloads_root, expanded);
+\t\t}
+\t}
+
+\t// Safe fallback if the Downloads known-folder value couldn't be read.
+\tif (!downloads_root[0]) {
+\t\tDWORD len = GetEnvironmentVariableW(
+\t\t\tL"USERPROFILE",
+\t\t\tdownloads_root,
+\t\t\tMAX_PATH
+\t\t);
+
+\t\tif (!len || len >= MAX_PATH)
+\t\t\twcscpy(downloads_root, L"C:\\");
+
+\t\tif (wcslen(downloads_root) + 10 < MAX_PATH)
+\t\t\twcscat(downloads_root, L"\\Downloads");
+\t}
+
+\t_snwprintf(
+\t\tdownload_path,
+\t\tMAX_PATH - 1,
+\t\tL"%s\\Telegram",
+\t\tdownloads_root
+\t);
+
+\tdownload_path[MAX_PATH - 1] = 0;
+
+\t// Create Downloads\\Telegram if it doesn't exist yet.
+\tCreateDirectoryW(download_path, NULL);
+
+\tif (!SetCurrentDirectoryW(download_path)) {
+\t\tdiag_log(
+\t\t\t"failed to set Telegram download directory error=%lu",
+\t\t\tGetLastError()
+\t\t);
+\t} else {
+\t\tdiag_log("Telegram download directory configured");
+\t}
+
+\t// Keep options.ini consistent with the actual directory.
+\tWritePrivateProfileStringW(
+\t\tL"General",
+\t\tL"download_path",
+\t\tdownload_path,
+\t\tappdata_path
+\t);'''
+
+if old not in s:
+    raise SystemExit(
+        "Could not locate Telegacy download_path initialization"
+    )
+
+s = s.replace(old, new, 1)
+
 write(t, s)
 
 # ----- src/response.cpp -----
