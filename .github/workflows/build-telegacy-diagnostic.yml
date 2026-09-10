@@ -71,6 +71,11 @@ jobs:
         run: |
             python "telegacy-diagnostic\patch_media_gallery_nav.py" "telegacy-src"
 
+      - name: Add direct Media page jump
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_page_jump.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
