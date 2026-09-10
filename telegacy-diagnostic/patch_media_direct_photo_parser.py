@@ -36,11 +36,28 @@ def function_range(source, signature):
     depth = 0
     in_string = False
     in_char = False
+    in_line_comment = False
+    in_block_comment = False
     escaped = False
     i = brace
 
     while i < len(source):
         c = source[i]
+        n = source[i + 1] if i + 1 < len(source) else ""
+
+        if in_line_comment:
+            if c == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if in_block_comment:
+            if c == "*" and n == "/":
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
 
         if in_string:
             if escaped:
@@ -49,24 +66,45 @@ def function_range(source, signature):
                 escaped = True
             elif c == '"':
                 in_string = False
-        elif in_char:
+            i += 1
+            continue
+
+        if in_char:
             if escaped:
                 escaped = False
             elif c == "\\":
                 escaped = True
             elif c == "'":
                 in_char = False
-        else:
-            if c == '"':
-                in_string = True
-            elif c == "'":
-                in_char = True
-            elif c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    return start, i + 1
+            i += 1
+            continue
+
+        if c == "/" and n == "/":
+            in_line_comment = True
+            i += 2
+            continue
+
+        if c == "/" and n == "*":
+            in_block_comment = True
+            i += 2
+            continue
+
+        if c == '"':
+            in_string = True
+            i += 1
+            continue
+
+        if c == "'":
+            in_char = True
+            i += 1
+            continue
+
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return start, i + 1
 
         i += 1
 
