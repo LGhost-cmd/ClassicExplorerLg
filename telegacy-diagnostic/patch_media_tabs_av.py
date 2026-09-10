@@ -1098,6 +1098,12 @@ static bool media_player_open(
     // Telegacy already uses COM/OLE, but initialize defensively for DirectShow.
     CoInitialize(NULL);
 
+    diag_log(
+        "media player open video=%d path=%ls",
+        video ? 1 : 0,
+        path
+    );
+
     HRESULT hr =
         CoCreateInstance(
             CLSID_FilterGraph,
@@ -1106,6 +1112,11 @@ static bool media_player_open(
             IID_IGraphBuilder,
             (void**)&media_player_graph
         );
+
+    diag_log(
+        "media player graph hr=0x%08X",
+        (unsigned int)hr
+    );
 
     if (FAILED(hr)) {
         MessageBoxW(
@@ -1128,6 +1139,11 @@ static bool media_player_open(
             path,
             NULL
         );
+
+    diag_log(
+        "media player RenderFile hr=0x%08X",
+        (unsigned int)hr
+    );
 
     if (FAILED(hr)) {
         wchar_t error[260];
@@ -1198,14 +1214,28 @@ static bool media_player_open(
             );
 
             media_player_layout_video();
+
+            PostMessageW(
+                hMediaPlayerWindow,
+                WM_SIZE,
+                0,
+                0
+            );
         }
     }
 
     if (media_player_audio)
         media_player_audio->put_Volume(-750);
 
-    if (media_player_control)
-        media_player_control->Run();
+    if (media_player_control) {
+        HRESULT run_hr =
+            media_player_control->Run();
+
+        diag_log(
+            "media player Run hr=0x%08X",
+            (unsigned int)run_hr
+        );
+    }
 
     ShowWindow(
         hMediaPlayerWindow,
@@ -1292,6 +1322,17 @@ static bool media_archive_begin_av_download(
         item->media_kind == 0 ||
         !item->has_document
     ) {
+        diag_log(
+            "media av open rejected item=%d kind=%d has_document=%d",
+            item_index,
+            item->media_kind,
+            item->has_document ? 1 : 0
+        );
+
+        MessageBeep(
+            MB_ICONASTERISK
+        );
+
         return false;
     }
 
@@ -1672,10 +1713,10 @@ static void media_archive_reset_for_kind(
         return;
     }
 
-    media_archive_clear();
-
     media_archive_kind =
         kind;
+
+    media_archive_clear();
 
     media_archive_server_active = true;
     media_archive_search_pending = false;
@@ -1748,6 +1789,15 @@ s = s[:req_start] + req_func + s[req_end:]
 refresh = r'''static void media_archive_refresh() {
     if (!hMediaArchiveList)
         return;
+
+    // Build each update off-screen and present it once. This prevents the
+    // classic ListView from visibly erasing/recreating itself for every item.
+    SendMessageW(
+        hMediaArchiveList,
+        WM_SETREDRAW,
+        FALSE,
+        0
+    );
 
     ListView_DeleteAllItems(
         hMediaArchiveList
@@ -1940,6 +1990,23 @@ refresh = r'''static void media_archive_refresh() {
     }
 
     media_archive_update_nav();
+
+    SendMessageW(
+        hMediaArchiveList,
+        WM_SETREDRAW,
+        TRUE,
+        0
+    );
+
+    RedrawWindow(
+        hMediaArchiveList,
+        NULL,
+        NULL,
+        RDW_INVALIDATE |
+        RDW_ERASE |
+        RDW_UPDATENOW |
+        RDW_ALLCHILDREN
+    );
 }'''
 
 s = replace_function(
@@ -2296,7 +2363,8 @@ window_proc = r'''static LRESULT CALLBACK TelegacyMediaArchiveWindow(
             ListView_SetExtendedListViewStyle(
                 hMediaArchiveList,
                 LVS_EX_BORDERSELECT |
-                LVS_EX_FULLROWSELECT
+                LVS_EX_FULLROWSELECT |
+                LVS_EX_DOUBLEBUFFER
             );
 
             media_archive_refresh();
@@ -2410,6 +2478,12 @@ window_proc = r'''static LRESULT CALLBACK TelegacyMediaArchiveWindow(
                     selected <= 2 &&
                     selected != media_archive_kind
                 ) {
+                    diag_log(
+                        "media tab switch old=%d new=%d",
+                        media_archive_kind,
+                        selected
+                    );
+
                     media_archive_reset_for_kind(
                         selected
                     );
@@ -2455,7 +2529,7 @@ window_proc = r'''static LRESULT CALLBACK TelegacyMediaArchiveWindow(
                         SetTimer(
                             hwnd,
                             MEDIA_ARCHIVE_CLICK_TIMER,
-                            GetDoubleClickTime() + 20,
+                            GetDoubleClickTime() + 120,
                             NULL
                         );
                     }
@@ -2621,21 +2695,207 @@ show_start, show_end = function_range(
 )
 show_func = s[show_start:show_end]
 
-if "media_archive_kind = 0;" not in show_func:
-    activation = "        media_archive_server_active = true;"
-    if activation not in show_func:
-        raise SystemExit(
-            "Could not locate Media activation in media_archive_show()."
-        )
+# Preserve the last selected tab. Never force media_archive_kind=0 after
+# CreateWindow(), because WM_CREATE has already selected the visible tab.
+show_func = show_func.replace(
+    "        media_archive_kind = 0;\n",
+    ""
+)
 
+existing_refresh = r'''        media_archive_refresh();
+
+        ShowWindow(
+            hMediaArchiveWindow,
+            SW_SHOW
+        );'''
+
+existing_refresh_new = r'''        if (hMediaArchiveTabs) {
+            TabCtrl_SetCurSel(
+                hMediaArchiveTabs,
+                media_archive_kind
+            );
+        }
+
+        media_archive_refresh();
+
+        ShowWindow(
+            hMediaArchiveWindow,
+            SW_SHOW
+        );'''
+
+if existing_refresh in show_func:
     show_func = show_func.replace(
-        activation,
-        "        media_archive_kind = 0;\n"
-        + activation,
+        existing_refresh,
+        existing_refresh_new,
         1
     )
 
 s = s[:show_start] + show_func + s[show_end:]
+
+
+# Keep the Media window open and active when a single click performs
+# "go to message". The conversation scrolls behind the tool window.
+jump_start, jump_end = function_range(
+    s,
+    "void media_archive_jump_to_message("
+)
+jump_func = s[jump_start:jump_end]
+
+local_focus_block = r'''        if (
+            hMediaArchiveWindow &&
+            IsWindow(hMediaArchiveWindow)
+        ) {
+            DestroyWindow(
+                hMediaArchiveWindow
+            );
+        }
+
+        SetForegroundWindow(
+            hMain
+        );
+
+        SetFocus(chat);
+
+'''
+
+if local_focus_block not in jump_func:
+    raise SystemExit(
+        "Could not locate local Media jump close/focus block."
+    )
+
+jump_func = jump_func.replace(
+    local_focus_block,
+    r'''        if (
+            hMediaArchiveWindow &&
+            IsWindow(hMediaArchiveWindow)
+        ) {
+            SetForegroundWindow(
+                hMediaArchiveWindow
+            );
+
+            if (hMediaArchiveList) {
+                SetFocus(
+                    hMediaArchiveList
+                );
+            }
+        }
+
+''',
+    1
+)
+
+network_focus_block = r'''    // A click means "go to message"; close the tool window and bring the
+    // conversation forward. A double-click is delayed/cancelled separately.
+    if (
+        hMediaArchiveWindow &&
+        IsWindow(hMediaArchiveWindow)
+    ) {
+        DestroyWindow(
+            hMediaArchiveWindow
+        );
+    }
+
+    SetForegroundWindow(
+        hMain
+    );
+
+'''
+
+if network_focus_block not in jump_func:
+    raise SystemExit(
+        "Could not locate network Media jump close/focus block."
+    )
+
+jump_func = jump_func.replace(
+    network_focus_block,
+    r'''    // Keep Media active while the requested history context is applied
+    // to the conversation behind it.
+    if (
+        hMediaArchiveWindow &&
+        IsWindow(hMediaArchiveWindow)
+    ) {
+        SetForegroundWindow(
+            hMediaArchiveWindow
+        );
+
+        if (hMediaArchiveList) {
+            SetFocus(
+                hMediaArchiveList
+            );
+        }
+    }
+
+''',
+    1
+)
+
+s = s[:jump_start] + jump_func + s[jump_end:]
+
+
+finish_start, finish_end = function_range(
+    s,
+    "void media_archive_finish_jump()"
+)
+finish_func = s[finish_start:finish_end]
+
+finish_focus_block = r'''        SetForegroundWindow(
+            hMain
+        );
+
+        SetFocus(chat);
+
+'''
+
+if finish_focus_block not in finish_func:
+    raise SystemExit(
+        "Could not locate Media finish-jump focus block."
+    )
+
+finish_func = finish_func.replace(
+    finish_focus_block,
+    r'''        if (
+            hMediaArchiveWindow &&
+            IsWindow(hMediaArchiveWindow)
+        ) {
+            SetForegroundWindow(
+                hMediaArchiveWindow
+            );
+
+            if (hMediaArchiveList) {
+                SetFocus(
+                    hMediaArchiveList
+                );
+            }
+        }
+
+''',
+    1
+)
+
+s = s[:finish_start] + finish_func + s[finish_end:]
+
+
+error_start, error_end = function_range(
+    s,
+    "void media_archive_handle_jump_rpc_error("
+)
+error_func = s[error_start:error_end]
+
+error_focus_block = r'''    SetForegroundWindow(
+        hMain
+    );
+
+'''
+
+if error_focus_block in error_func:
+    error_func = error_func.replace(
+        error_focus_block,
+        "",
+        1
+    )
+
+s = s[:error_start] + error_func + s[error_end:]
+
 
 write(t, s)
 
