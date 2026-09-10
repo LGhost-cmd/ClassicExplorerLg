@@ -86,6 +86,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_direct_photo_parser.py" "telegacy-src"
 
+      - name: Add Media tabs and classic A-V player
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_tabs_av.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
