@@ -1197,13 +1197,17 @@ media_route = (
 )
 
 if media_route not in s:
-    call_pos = s.find(
-        "message_search_handle_server_response("
+    # Find the actual CALL inside response_handler(), not the static helper
+    # definition near the top of response.cpp.
+    call_marker = (
+        "\t\t\tmessage_search_handle_server_response(\n"
     )
+
+    call_pos = s.find(call_marker)
 
     if call_pos < 0:
         raise SystemExit(
-            "Could not locate server-search response call. "
+            "Could not locate server-search response handler call. "
             "Run patch_server_search.py before this patch."
         )
 
@@ -1220,10 +1224,11 @@ if media_route not in s:
     if (
         route_pos < 0 or
         call_pos - route_pos >
-            1600
+            2000
     ):
         raise SystemExit(
-            "Could not associate messages.search response route."
+            "Could not associate messages.search response handler call "
+            "with its message_search_matches_rpc() route."
         )
 
     s = (
@@ -1248,13 +1253,16 @@ media_error_route = (
 )
 
 if media_error_route not in s:
-    call_pos = s.find(
-        "message_search_handle_rpc_error("
+    # As above, key off the indented CALL in the rpc_error case.
+    call_marker = (
+        "\t\t\tmessage_search_handle_rpc_error(\n"
     )
+
+    call_pos = s.find(call_marker)
 
     if call_pos < 0:
         raise SystemExit(
-            "Could not locate server-search rpc_error call."
+            "Could not locate server-search rpc_error handler call."
         )
 
     condition = (
@@ -1270,10 +1278,11 @@ if media_error_route not in s:
     if (
         route_pos < 0 or
         call_pos - route_pos >
-            1600
+            2000
     ):
         raise SystemExit(
-            "Could not associate server-search rpc_error route."
+            "Could not associate server-search rpc_error handler call "
+            "with its message_search_matches_rpc() route."
         )
 
     s = (
