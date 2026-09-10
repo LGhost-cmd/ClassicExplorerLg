@@ -81,6 +81,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_stability_jump.py" "telegacy-src"
 
+      - name: Use direct safe Media photo parser
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_direct_photo_parser.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
