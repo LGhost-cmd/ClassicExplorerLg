@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import sys
+import base64
+import json
+import subprocess
+import urllib.request
 
 if len(sys.argv) != 2:
-    raise SystemExit(
-        "Usage: patch_media_tabs_av.py <Telegacy source directory>"
-    )
+    raise SystemExit("Usage: patch_media_tabs_av.py <Telegacy source directory>")
 
 root = Path(sys.argv[1]).resolve()
 h = root / "include" / "telegacy.h"
 t = root / "src" / "telegacy.cpp"
 r = root / "src" / "response.cpp"
+m = root / "src" / "message.cpp"
 
-for p in (h, t, r):
+for p in (h, t, r, m):
     if not p.exists():
         raise SystemExit(f"Missing expected Telegacy file: {p}")
 
@@ -117,202 +120,469 @@ def replace_function(source, signature, replacement):
     return source[:start] + replacement + source[end:]
 
 
-# =============================================================================
-# include/telegacy.h - DirectShow + cross-file Media hooks
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Single-file replacement mode.
+#
+# This file replaces the old patch_media_tabs_av.py in the repository.  It
+# first applies the exact previous v1 patch, then immediately applies v2.
+# Therefore the workflow continues to contain ONE command only:
+#
+#   python "telegacy-diagnostic\patch_media_tabs_av.py" "telegacy-src"
+#
+# The previous v1 patch is pinned by Git blob SHA so replacing this file on
+# master cannot make the bootstrap download itself recursively.
+# -----------------------------------------------------------------------------
+
+V1_BLOB_SHA = "b54ddc7af64c5a43143254c00d566c187aa609fb"
+V1_BLOB_API = (
+    "https://api.github.com/repos/LGhost-cmd/ClassicExplorerLg/git/blobs/"
+    + V1_BLOB_SHA
+)
+
+
+def load_previous_v1_patch():
+    # Fast/offline path: the old blob may already be present in the local
+    # checkout's object database.
+    try:
+        repo_root = Path(__file__).resolve().parent.parent
+
+        data = subprocess.check_output(
+            ["git", "cat-file", "blob", V1_BLOB_SHA],
+            cwd=str(repo_root),
+            stderr=subprocess.DEVNULL,
+        )
+
+        if data:
+            return data.decode("utf-8")
+    except Exception:
+        pass
+
+    # GitHub Actions has network access because the workflow already clones
+    # Telegacy and restores dependencies.  Fetch the immutable old blob rather
+    # than the current file path.
+    try:
+        request = urllib.request.Request(
+            V1_BLOB_API,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ClassicExplorerLg-Telegacy-patcher",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        encoded = payload.get("content", "")
+        encoding = payload.get("encoding", "")
+
+        if encoding != "base64" or not encoded:
+            raise RuntimeError("GitHub returned an unexpected blob representation")
+
+        return base64.b64decode(encoded).decode("utf-8")
+
+    except Exception as exc:
+        raise SystemExit(
+            "Could not obtain the pinned Media A/V v1 patch "
+            f"({V1_BLOB_SHA}). Error: {exc}"
+        )
+
+
+def apply_previous_v1_if_needed():
+    if "media_tabs_av_runtime_v1" in read(t):
+        return
+
+    print(
+        "Media A/V v1 is not present; applying the pinned previous "
+        "patch_media_tabs_av.py first..."
+    )
+
+    source = load_previous_v1_patch()
+
+    namespace = {
+        "__name__": "__main__",
+        "__file__": "patch_media_tabs_av_v1_pinned.py",
+    }
+
+    try:
+        exec(
+            compile(
+                source,
+                "patch_media_tabs_av_v1_pinned.py",
+                "exec",
+            ),
+            namespace,
+            namespace,
+        )
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            raise
+
+    if "media_tabs_av_runtime_v1" not in read(t):
+        raise SystemExit(
+            "Pinned Media A/V v1 patch finished, but its runtime marker "
+            "was not found in telegacy.cpp."
+        )
+
+
+apply_previous_v1_if_needed()
+
+s = read(t)
+if "media_tabs_av_runtime_v2" in s:
+    print("Media A/V v2 already applied.")
+    raise SystemExit(0)
+
+
+# -----------------------------------------------------------------------------
+# telegacy.h: MFPlay / cross-file declarations
+# -----------------------------------------------------------------------------
 
 s = read(h)
 
-if "media_tabs_av_v1" not in s:
-    include_anchor = "#include <ddeml.h>"
-    if include_anchor not in s:
-        raise SystemExit("Could not locate ddeml.h include in telegacy.h")
+s = s.replace("#define _WIN32_WINNT 0x0400", "#define _WIN32_WINNT 0x0601", 1)
+s = s.replace("#define WINVER 0x0500", "#define WINVER 0x0601", 1)
 
+if "#include <mfplay.h>" not in s:
+    anchor = "#include <dshow.h>"
+    if anchor not in s:
+        raise SystemExit("Could not locate #include <dshow.h> in telegacy.h")
     s = s.replace(
-        include_anchor,
-        include_anchor
-        + "\n#include <dshow.h>"
-        + "\n#pragma comment(lib, \"strmiids.lib\")"
-        + "\n// media_tabs_av_v1",
-        1
+        anchor,
+        anchor + "\n#include <mfplay.h>\n#pragma comment(lib, \"mfplay.lib\")",
+        1,
     )
 
-    decl_anchor = "void media_archive_start_next_download();"
-    if decl_anchor not in s:
-        raise SystemExit(
-            "Could not locate Media declarations. "
-            "Run the existing Media patches first."
-        )
-
-    decls = r'''
-
-// Three-tab Media browser / built-in A/V player.
-extern int media_archive_kind; // 0 images, 1 video, 2 music
-
-void media_archive_add_av_document(
-    Document* document,
-    int message_id,
-    int kind,
-    const wchar_t* display_name,
-    int duration
-);
-
-void media_archive_av_download_complete(
-    const wchar_t* path
-);
-
-void media_archive_finish_av_page();
-
-void media_player_chat_download_complete(
-    const wchar_t* path
-);
-'''
-
-    s = s.replace(decl_anchor, decl_anchor + decls, 1)
+if "media_archive_preserve_on_chat_clear" not in s:
+    anchor = "void media_player_chat_download_complete(\n    const wchar_t* path\n);"
+    if anchor not in s:
+        raise SystemExit("Could not locate media_player_chat_download_complete declaration")
+    s = s.replace(
+        anchor,
+        anchor
+        + "\n\nextern bool media_archive_preserve_on_chat_clear;"
+        + "\nbool media_player_is_music_path(const wchar_t* path);"
+        + "\nbool media_inline_audio_toggle(const wchar_t* path);",
+        1,
+    )
 
 write(h, s)
 
-# Make the DirectShow GUID library explicit for CMake-based diagnostic builds.
+# pragma comment is enough for MSVC, but keep CMake explicit too.
 cmake = root / "CMakeLists.txt"
 if cmake.exists():
     cm = cmake.read_text(encoding="utf-8")
-
-    if "strmiids" not in cm.lower():
-        link_anchor = "    ole32\\n"
-
-        if link_anchor in cm:
-            cm = cm.replace(
-                link_anchor,
-                link_anchor + "    strmiids\\n",
-                1
-            )
-
-            cmake.write_text(
-                cm,
-                encoding="utf-8",
-                newline="\\n"
-            )
+    if "mfplay" not in cm.lower():
+        if "    strmiids\n" in cm:
+            cm = cm.replace("    strmiids\n", "    strmiids\n    mfplay\n", 1)
+        elif "    ole32\n" in cm:
+            cm = cm.replace("    ole32\n", "    ole32\n    mfplay\n", 1)
+        cmake.write_text(cm, encoding="utf-8", newline="\n")
 
 
-# =============================================================================
-# src/telegacy.cpp - tabs, filter selection, A/V items and DirectShow player
-# =============================================================================
+# -----------------------------------------------------------------------------
+# telegacy.cpp: MFPlay-first video + inline audio + classic controls
+# -----------------------------------------------------------------------------
 
 s = read(t)
 
-if "media_tabs_av_runtime_v1" in s:
-    print("Media tabs/A-V runtime patch already applied.")
-    raise SystemExit(0)
+player_global = "static IVideoWindow* media_player_video = NULL;"
+if player_global not in s:
+    raise SystemExit("Could not locate media_player_video global")
 
-if "media_archive_direct_photo_parser_v1" not in s:
-    raise SystemExit(
-        "Direct safe photo parser is not present. "
-        "Run patch_media_direct_photo_parser.py before this patch."
-    )
+s = s.replace(
+    player_global,
+    player_global
+    + r'''
 
-old_struct = r'''struct MediaArchiveItem {
-    __int64 document_id;
-    int message_id;
-    int page_index;
-    HBITMAP bitmap;
-    wchar_t file_path[MAX_PATH];
-};'''
+// media_tabs_av_runtime_v2
+static IMFPMediaPlayer* media_player_mf = NULL;
+static IMFPMediaPlayer* media_inline_audio = NULL;
+static int media_player_backend = 0; // 0 none, 1 MFPlay, 2 DirectShow
+static wchar_t media_inline_audio_path[MAX_PATH] = {0};
+bool media_archive_preserve_on_chat_clear = false;
+''',
+    1,
+)
 
-new_struct = r'''struct MediaArchiveItem {
-    __int64 document_id;
-    int message_id;
-    int page_index;
-    HBITMAP bitmap;
-    wchar_t file_path[MAX_PATH];
+helper_pos = s.find("static void media_player_release_graph()")
+if helper_pos < 0:
+    raise SystemExit("Could not locate media_player_release_graph")
 
-    // media_tabs_av_runtime_v1
-    int media_kind;        // 0 image, 1 video, 2 music
-    int duration;
-    bool has_document;
-    Document av_document;
-    wchar_t display_name[260];
-};'''
+helpers = r'''
+static HRESULT media_mf_create_player(
+    const wchar_t* path,
+    HWND video_window,
+    IMFPMediaPlayer** out_player
+) {
+    if (!path || !path[0] || !out_player)
+        return E_INVALIDARG;
 
-if old_struct not in s:
-    raise SystemExit("Could not locate MediaArchiveItem layout.")
+    *out_player = NULL;
 
-s = s.replace(old_struct, new_struct, 1)
+    HRESULT hr =
+        MFPCreateMediaPlayer(
+            NULL,
+            FALSE,
+            MFP_OPTION_NONE,
+            NULL,
+            video_window,
+            out_player
+        );
 
-add_start, add_end = function_range(s, "void media_archive_add_document(")
-add_func = s[add_start:add_end]
+    if (FAILED(hr) || !*out_player)
+        return FAILED(hr) ? hr : E_FAIL;
 
-if "MediaArchiveItem item = {0};" not in add_func:
-    if "MediaArchiveItem item;" not in add_func:
-        raise SystemExit("Could not locate MediaArchiveItem construction.")
-    add_func = add_func.replace(
-        "MediaArchiveItem item;",
-        "MediaArchiveItem item = {0};",
-        1
-    )
+    IMFPMediaItem* item = NULL;
 
-needle = "    item.document_id =\n        document_id;"
-if needle in add_func and "item.media_kind = 0;" not in add_func:
-    add_func = add_func.replace(
-        needle,
-        needle + "\n\n    item.media_kind = 0;",
-        1
-    )
+    hr =
+        (*out_player)->CreateMediaItemFromURL(
+            path,
+            TRUE,
+            0,
+            &item
+        );
 
-s = s[:add_start] + add_func + s[add_end:]
+    if (SUCCEEDED(hr) && item)
+        hr = (*out_player)->SetMediaItem(item);
 
-anchor = "static void media_archive_update_nav()"
-pos = s.find(anchor)
+    if (item)
+        item->Release();
 
-if pos < 0:
-    raise SystemExit("Could not locate media_archive_update_nav().")
+    if (FAILED(hr)) {
+        (*out_player)->Shutdown();
+        (*out_player)->Release();
+        *out_player = NULL;
+    }
 
-runtime = r'''
-// ======================================================================================
-// Three-tab Media browser + Windows 98 / ActiveMovie-style DirectShow player
-// ======================================================================================
-
-int media_archive_kind = 0;
-
-static HWND hMediaArchiveTabs = NULL;
-
-static HWND hMediaPlayerWindow = NULL;
-static HWND hMediaPlayerVideoHost = NULL;
-static HWND hMediaPlayerInfo = NULL;
-static HWND hMediaPlayerPlay = NULL;
-static HWND hMediaPlayerPause = NULL;
-static HWND hMediaPlayerStop = NULL;
-static HWND hMediaPlayerSeek = NULL;
-static HWND hMediaPlayerVolume = NULL;
-static HWND hMediaPlayerTime = NULL;
-
-static IGraphBuilder* media_player_graph = NULL;
-static IMediaControl* media_player_control = NULL;
-static IMediaSeeking* media_player_seeking = NULL;
-static IBasicAudio* media_player_audio = NULL;
-static IVideoWindow* media_player_video = NULL;
-
-static bool media_player_is_video = false;
-static bool media_player_user_seeking = false;
-static const UINT_PTR MEDIA_PLAYER_TIMER = 93;
-
-static int media_av_pending_item = -1;
-static wchar_t media_av_pending_path[MAX_PATH] = {0};
-
-static bool media_archive_request_server_page(
-    int offset_id
-);
-
-static unsigned int media_archive_filter_constructor() {
-    if (media_archive_kind == 1)
-        return 0x9fc00e65; // inputMessagesFilterVideo
-
-    if (media_archive_kind == 2)
-        return 0x3751b49e; // inputMessagesFilterMusic
-
-    return 0x9609a51c; // inputMessagesFilterPhotos
+    return hr;
 }
 
-static void media_player_release_graph() {
+static void media_inline_audio_release() {
+    if (media_inline_audio) {
+        media_inline_audio->Stop();
+        media_inline_audio->Shutdown();
+        media_inline_audio->Release();
+        media_inline_audio = NULL;
+    }
+
+    media_inline_audio_path[0] = 0;
+}
+
+bool media_player_is_music_path(
+    const wchar_t* path
+) {
+    if (!path || !path[0])
+        return false;
+
+    const wchar_t* leaf = wcsrchr(path, L'\\');
+    leaf = leaf ? leaf + 1 : path;
+
+    // Don't turn Telegacy's generated voice-note files into music rows.
+    if (_wcsnicmp(leaf, L"voice", 5) == 0)
+        return false;
+
+    const wchar_t* dot = wcsrchr(leaf, L'.');
+    if (!dot)
+        return false;
+
+    return
+        _wcsicmp(dot, L".mp3") == 0 ||
+        _wcsicmp(dot, L".m4a") == 0 ||
+        _wcsicmp(dot, L".aac") == 0 ||
+        _wcsicmp(dot, L".wav") == 0 ||
+        _wcsicmp(dot, L".wma") == 0 ||
+        _wcsicmp(dot, L".ogg") == 0 ||
+        _wcsicmp(dot, L".opus") == 0 ||
+        _wcsicmp(dot, L".flac") == 0;
+}
+
+bool media_inline_audio_toggle(
+    const wchar_t* path
+) {
+    if (!media_player_is_music_path(path))
+        return false;
+
+    if (
+        media_inline_audio &&
+        media_inline_audio_path[0] &&
+        _wcsicmp(media_inline_audio_path, path) == 0
+    ) {
+        MFP_MEDIAPLAYER_STATE state = MFP_MEDIAPLAYER_STATE_EMPTY;
+
+        if (SUCCEEDED(media_inline_audio->GetState(&state))) {
+            HRESULT hr = S_OK;
+
+            if (state == MFP_MEDIAPLAYER_STATE_PLAYING)
+                hr = media_inline_audio->Pause();
+            else
+                hr = media_inline_audio->Play();
+
+            diag_log(
+                "inline audio toggle state=%d hr=0x%08X path=%ls",
+                (int)state,
+                (unsigned int)hr,
+                path
+            );
+
+            return SUCCEEDED(hr);
+        }
+    }
+
+    media_inline_audio_release();
+    CoInitialize(NULL);
+
+    HRESULT hr =
+        media_mf_create_player(
+            path,
+            NULL,
+            &media_inline_audio
+        );
+
+    if (SUCCEEDED(hr) && media_inline_audio) {
+        media_inline_audio->SetVolume(0.85f);
+        hr = media_inline_audio->Play();
+    }
+
+    diag_log(
+        "inline audio open hr=0x%08X path=%ls",
+        (unsigned int)hr,
+        path
+    );
+
+    if (FAILED(hr) || !media_inline_audio) {
+        media_inline_audio_release();
+        return false;
+    }
+
+    wcsncpy(
+        media_inline_audio_path,
+        path,
+        ARRAYSIZE(media_inline_audio_path) - 1
+    );
+    media_inline_audio_path[ARRAYSIZE(media_inline_audio_path) - 1] = 0;
+
+    return true;
+}
+
+static bool media_player_get_time(
+    LONGLONG* position,
+    LONGLONG* duration
+) {
+    if (!position || !duration)
+        return false;
+
+    *position = 0;
+    *duration = 0;
+
+    if (media_player_backend == 1 && media_player_mf) {
+        PROPVARIANT p = {0};
+        PROPVARIANT d = {0};
+
+        HRESULT hp = media_player_mf->GetPosition(MFP_POSITIONTYPE_100NS, &p);
+        HRESULT hd = media_player_mf->GetDuration(MFP_POSITIONTYPE_100NS, &d);
+
+        if (
+            SUCCEEDED(hp) &&
+            SUCCEEDED(hd) &&
+            p.vt == VT_I8 &&
+            d.vt == VT_I8
+        ) {
+            *position = p.hVal.QuadPart;
+            *duration = d.hVal.QuadPart;
+            return *duration > 0;
+        }
+
+        return false;
+    }
+
+    if (media_player_backend == 2 && media_player_seeking) {
+        return
+            SUCCEEDED(media_player_seeking->GetCurrentPosition(position)) &&
+            SUCCEEDED(media_player_seeking->GetDuration(duration)) &&
+            *duration > 0;
+    }
+
+    return false;
+}
+
+static void media_player_set_position_v2(LONGLONG target) {
+    if (media_player_backend == 1 && media_player_mf) {
+        PROPVARIANT value = {0};
+        value.vt = VT_I8;
+        value.hVal.QuadPart = target;
+        media_player_mf->SetPosition(MFP_POSITIONTYPE_100NS, &value);
+        return;
+    }
+
+    if (media_player_backend == 2 && media_player_seeking) {
+        media_player_seeking->SetPositions(
+            &target,
+            AM_SEEKING_AbsolutePositioning,
+            NULL,
+            AM_SEEKING_NoPositioning
+        );
+    }
+}
+
+static void media_player_draw_transport(DRAWITEMSTRUCT* dis) {
+    if (!dis)
+        return;
+
+    RECT rc = dis->rcItem;
+    FillRect(dis->hDC, &rc, GetSysColorBrush(COLOR_BTNFACE));
+
+    DrawEdge(
+        dis->hDC,
+        &rc,
+        (dis->itemState & ODS_SELECTED) ? EDGE_SUNKEN : EDGE_RAISED,
+        BF_RECT
+    );
+
+    InflateRect(&rc, -7, -5);
+    if (dis->itemState & ODS_SELECTED)
+        OffsetRect(&rc, 1, 1);
+
+    COLORREF color = GetSysColor(COLOR_BTNTEXT);
+    HBRUSH brush = CreateSolidBrush(color);
+    HPEN pen = CreatePen(PS_SOLID, 1, color);
+    HGDIOBJ old_brush = SelectObject(dis->hDC, brush);
+    HGDIOBJ old_pen = SelectObject(dis->hDC, pen);
+
+    int cx = (rc.left + rc.right) / 2;
+    int cy = (rc.top + rc.bottom) / 2;
+
+    if (dis->CtlID == 10) {
+        POINT tri[3] = {
+            {cx - 5, cy - 7},
+            {cx - 5, cy + 7},
+            {cx + 7, cy}
+        };
+        Polygon(dis->hDC, tri, 3);
+    } else if (dis->CtlID == 11) {
+        Rectangle(dis->hDC, cx - 7, cy - 7, cx - 2, cy + 8);
+        Rectangle(dis->hDC, cx + 2, cy - 7, cx + 7, cy + 8);
+    } else if (dis->CtlID == 12) {
+        Rectangle(dis->hDC, cx - 6, cy - 6, cx + 7, cy + 7);
+    }
+
+    SelectObject(dis->hDC, old_pen);
+    SelectObject(dis->hDC, old_brush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+}
+
+'''
+
+s = s[:helper_pos] + helpers + s[helper_pos:]
+
+release_v2 = r'''static void media_player_release_graph() {
+    if (media_player_mf) {
+        media_player_mf->Stop();
+        media_player_mf->Shutdown();
+        media_player_mf->Release();
+        media_player_mf = NULL;
+    }
+
     if (media_player_control)
         media_player_control->Stop();
 
@@ -342,90 +612,25 @@ static void media_player_release_graph() {
         media_player_graph->Release();
         media_player_graph = NULL;
     }
-}
 
-static void media_player_format_time(
-    LONGLONG value,
-    wchar_t* out,
-    int out_count
-) {
-    if (!out || out_count < 8)
+    media_player_backend = 0;
+}'''
+
+s = replace_function(s, "static void media_player_release_graph()", release_v2)
+
+update_v2 = r'''static void media_player_update_controls() {
+    if (!hMediaPlayerSeek)
         return;
-
-    LONGLONG seconds =
-        value / 10000000LL;
-
-    int hours =
-        (int)(seconds / 3600);
-
-    int minutes =
-        (int)((seconds / 60) % 60);
-
-    int secs =
-        (int)(seconds % 60);
-
-    if (hours > 0) {
-        _snwprintf(
-            out,
-            out_count - 1,
-            L"%d:%02d:%02d",
-            hours,
-            minutes,
-            secs
-        );
-    } else {
-        _snwprintf(
-            out,
-            out_count - 1,
-            L"%02d:%02d",
-            minutes,
-            secs
-        );
-    }
-
-    out[out_count - 1] = 0;
-}
-
-static void media_player_update_controls() {
-    if (
-        !media_player_seeking ||
-        !hMediaPlayerSeek
-    ) {
-        return;
-    }
 
     LONGLONG position = 0;
     LONGLONG duration = 0;
 
-    if (
-        FAILED(
-            media_player_seeking->GetCurrentPosition(
-                &position
-            )
-        ) ||
-        FAILED(
-            media_player_seeking->GetDuration(
-                &duration
-            )
-        ) ||
-        duration <= 0
-    ) {
+    if (!media_player_get_time(&position, &duration))
         return;
-    }
 
     if (!media_player_user_seeking) {
-        int slider =
-            (int)(
-                position * 1000LL /
-                duration
-            );
-
-        SendMessageW(
-            hMediaPlayerSeek,
-            TBM_SETPOS,
-            TRUE,
-            slider
-        );
+        int slider = (int)(position * 1000LL / duration);
+        SendMessageW(hMediaPlayerSeek, TBM_SETPOS, TRUE, slider);
     }
 
     if (hMediaPlayerTime) {
@@ -433,17 +638,8 @@ static void media_player_update_controls() {
         wchar_t total_text[32] = {0};
         wchar_t combined[80] = {0};
 
-        media_player_format_time(
-            position,
-            now_text,
-            ARRAYSIZE(now_text)
-        );
-
-        media_player_format_time(
-            duration,
-            total_text,
-            ARRAYSIZE(total_text)
-        );
+        media_player_format_time(position, now_text, ARRAYSIZE(now_text));
+        media_player_format_time(duration, total_text, ARRAYSIZE(total_text));
 
         _snwprintf(
             combined,
@@ -452,20 +648,21 @@ static void media_player_update_controls() {
             now_text,
             total_text
         );
-
-        combined[
-            ARRAYSIZE(combined) - 1
-        ] = 0;
-
-        SetWindowTextW(
-            hMediaPlayerTime,
-            combined
-        );
+        combined[ARRAYSIZE(combined) - 1] = 0;
+        SetWindowTextW(hMediaPlayerTime, combined);
     }
-}
+}'''
 
-static void media_player_layout_video() {
+s = replace_function(s, "static void media_player_update_controls()", update_v2)
+
+layout_v2 = r'''static void media_player_layout_video() {
+    if (media_player_backend == 1 && media_player_mf) {
+        media_player_mf->UpdateVideo();
+        return;
+    }
+
     if (
+        media_player_backend != 2 ||
         !media_player_video ||
         !hMediaPlayerVideoHost
     ) {
@@ -473,20 +670,13 @@ static void media_player_layout_video() {
     }
 
     RECT rc;
-    GetClientRect(
-        hMediaPlayerVideoHost,
-        &rc
-    );
+    GetClientRect(hMediaPlayerVideoHost, &rc);
+    media_player_video->SetWindowPosition(0, 0, rc.right, rc.bottom);
+}'''
 
-    media_player_video->SetWindowPosition(
-        0,
-        0,
-        rc.right,
-        rc.bottom
-    );
-}
+s = replace_function(s, "static void media_player_layout_video()", layout_v2)
 
-static LRESULT CALLBACK TelegacyMediaPlayerWindow(
+player_window_v2 = r'''static LRESULT CALLBACK TelegacyMediaPlayerWindow(
     HWND hwnd,
     UINT msg,
     WPARAM wParam,
@@ -494,205 +684,73 @@ static LRESULT CALLBACK TelegacyMediaPlayerWindow(
 ) {
     switch (msg) {
         case WM_CREATE: {
-            HFONT font =
-                (HFONT)GetStockObject(
-                    DEFAULT_GUI_FONT
-                );
+            HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
-            hMediaPlayerVideoHost =
-                CreateWindowExW(
-                    WS_EX_CLIENTEDGE,
-                    L"STATIC",
-                    L"",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    SS_BLACKRECT,
-                    8,
-                    8,
-                    544,
-                    306,
-                    hwnd,
-                    (HMENU)1,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerInfo =
-                CreateWindowExW(
-                    WS_EX_CLIENTEDGE,
-                    L"STATIC",
-                    L"",
-                    WS_CHILD |
-                    SS_LEFT |
-                    SS_CENTERIMAGE,
-                    8,
-                    8,
-                    544,
-                    70,
-                    hwnd,
-                    (HMENU)2,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerPlay =
-                CreateWindowW(
-                    L"BUTTON",
-                    L">",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    BS_PUSHBUTTON,
-                    8,
-                    324,
-                    42,
-                    24,
-                    hwnd,
-                    (HMENU)10,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerPause =
-                CreateWindowW(
-                    L"BUTTON",
-                    L"||",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    BS_PUSHBUTTON,
-                    55,
-                    324,
-                    42,
-                    24,
-                    hwnd,
-                    (HMENU)11,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerStop =
-                CreateWindowW(
-                    L"BUTTON",
-                    L"[]",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    BS_PUSHBUTTON,
-                    102,
-                    324,
-                    42,
-                    24,
-                    hwnd,
-                    (HMENU)12,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerTime =
-                CreateWindowW(
-                    L"STATIC",
-                    L"00:00 / 00:00",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    SS_RIGHT |
-                    SS_CENTERIMAGE,
-                    398,
-                    324,
-                    154,
-                    24,
-                    hwnd,
-                    (HMENU)13,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerSeek =
-                CreateWindowExW(
-                    0,
-                    TRACKBAR_CLASSW,
-                    L"",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    TBS_HORZ |
-                    TBS_NOTICKS,
-                    8,
-                    354,
-                    544,
-                    28,
-                    hwnd,
-                    (HMENU)14,
-                    NULL,
-                    NULL
-                );
-
-            hMediaPlayerVolume =
-                CreateWindowExW(
-                    0,
-                    TRACKBAR_CLASSW,
-                    L"",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    TBS_HORZ |
-                    TBS_NOTICKS,
-                    152,
-                    324,
-                    160,
-                    24,
-                    hwnd,
-                    (HMENU)15,
-                    NULL,
-                    NULL
-                );
-
-            SendMessageW(
-                hMediaPlayerSeek,
-                TBM_SETRANGE,
-                TRUE,
-                MAKELPARAM(0, 1000)
-            );
-
-            SendMessageW(
-                hMediaPlayerVolume,
-                TBM_SETRANGE,
-                TRUE,
-                MAKELPARAM(0, 100)
-            );
-
-            SendMessageW(
-                hMediaPlayerVolume,
-                TBM_SETPOS,
-                TRUE,
-                85
-            );
-
-            HWND controls[] = {
-                hMediaPlayerInfo,
-                hMediaPlayerPlay,
-                hMediaPlayerPause,
-                hMediaPlayerStop,
-                hMediaPlayerTime
-            };
-
-            for (
-                int i = 0;
-                i < ARRAYSIZE(controls);
-                i++
-            ) {
-                if (controls[i]) {
-                    SendMessageW(
-                        controls[i],
-                        WM_SETFONT,
-                        (WPARAM)font,
-                        TRUE
-                    );
-                }
-            }
-
-            SetTimer(
+            hMediaPlayerVideoHost = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"STATIC",
+                L"",
+                WS_CHILD | WS_VISIBLE | SS_BLACKRECT,
+                8, 8, 544, 306,
                 hwnd,
-                MEDIA_PLAYER_TIMER,
-                250,
+                (HMENU)1,
+                NULL,
                 NULL
             );
 
+            hMediaPlayerPlay = CreateWindowW(
+                L"BUTTON", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                8, 324, 42, 24,
+                hwnd, (HMENU)10, NULL, NULL
+            );
+
+            hMediaPlayerPause = CreateWindowW(
+                L"BUTTON", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                55, 324, 42, 24,
+                hwnd, (HMENU)11, NULL, NULL
+            );
+
+            hMediaPlayerStop = CreateWindowW(
+                L"BUTTON", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                102, 324, 42, 24,
+                hwnd, (HMENU)12, NULL, NULL
+            );
+
+            hMediaPlayerVolume = CreateWindowExW(
+                0,
+                TRACKBAR_CLASSW,
+                L"",
+                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+                152, 324, 160, 24,
+                hwnd, (HMENU)15, NULL, NULL
+            );
+
+            hMediaPlayerTime = CreateWindowW(
+                L"STATIC",
+                L"00:00 / 00:00",
+                WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
+                398, 324, 154, 24,
+                hwnd, (HMENU)13, NULL, NULL
+            );
+
+            hMediaPlayerSeek = CreateWindowExW(
+                0,
+                TRACKBAR_CLASSW,
+                L"",
+                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
+                8, 354, 544, 28,
+                hwnd, (HMENU)14, NULL, NULL
+            );
+
+            SendMessageW(hMediaPlayerSeek, TBM_SETRANGE, TRUE, MAKELPARAM(0, 1000));
+            SendMessageW(hMediaPlayerVolume, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+            SendMessageW(hMediaPlayerVolume, TBM_SETPOS, TRUE, 85);
+            SendMessageW(hMediaPlayerTime, WM_SETFONT, (WPARAM)font, TRUE);
+
+            SetTimer(hwnd, MEDIA_PLAYER_TIMER, 250, NULL);
             return 0;
         }
 
@@ -700,240 +758,94 @@ static LRESULT CALLBACK TelegacyMediaPlayerWindow(
             RECT rc;
             GetClientRect(hwnd, &rc);
 
-            int client_w =
-                rc.right - rc.left;
+            int client_w = rc.right - rc.left;
+            int client_h = rc.bottom - rc.top;
+            int controls_y = client_h - 84;
+            int seek_y = client_h - 48;
 
-            int client_h =
-                rc.bottom - rc.top;
+            MoveWindow(hMediaPlayerVideoHost, 8, 8, client_w - 16, controls_y - 16, TRUE);
+            MoveWindow(hMediaPlayerPlay, 8, controls_y, 42, 24, TRUE);
+            MoveWindow(hMediaPlayerPause, 55, controls_y, 42, 24, TRUE);
+            MoveWindow(hMediaPlayerStop, 102, controls_y, 42, 24, TRUE);
+            MoveWindow(hMediaPlayerVolume, 152, controls_y, 160, 24, TRUE);
+            MoveWindow(hMediaPlayerTime, client_w - 162, controls_y, 154, 24, TRUE);
+            MoveWindow(hMediaPlayerSeek, 8, seek_y, client_w - 16, 28, TRUE);
 
-            int bottom_y =
-                client_h - 84;
-
-            int seek_y =
-                client_h - 48;
-
-            if (media_player_is_video) {
-                ShowWindow(
-                    hMediaPlayerVideoHost,
-                    SW_SHOW
-                );
-
-                ShowWindow(
-                    hMediaPlayerInfo,
-                    SW_HIDE
-                );
-
-                MoveWindow(
-                    hMediaPlayerVideoHost,
-                    8,
-                    8,
-                    client_w - 16,
-                    bottom_y - 16,
-                    TRUE
-                );
-
-                media_player_layout_video();
-            } else {
-                ShowWindow(
-                    hMediaPlayerVideoHost,
-                    SW_HIDE
-                );
-
-                ShowWindow(
-                    hMediaPlayerInfo,
-                    SW_SHOW
-                );
-
-                MoveWindow(
-                    hMediaPlayerInfo,
-                    8,
-                    8,
-                    client_w - 16,
-                    bottom_y - 16,
-                    TRUE
-                );
-            }
-
-            MoveWindow(
-                hMediaPlayerPlay,
-                8,
-                bottom_y,
-                42,
-                24,
-                TRUE
-            );
-
-            MoveWindow(
-                hMediaPlayerPause,
-                55,
-                bottom_y,
-                42,
-                24,
-                TRUE
-            );
-
-            MoveWindow(
-                hMediaPlayerStop,
-                102,
-                bottom_y,
-                42,
-                24,
-                TRUE
-            );
-
-            MoveWindow(
-                hMediaPlayerVolume,
-                152,
-                bottom_y,
-                160,
-                24,
-                TRUE
-            );
-
-            MoveWindow(
-                hMediaPlayerTime,
-                client_w - 162,
-                bottom_y,
-                154,
-                24,
-                TRUE
-            );
-
-            MoveWindow(
-                hMediaPlayerSeek,
-                8,
-                seek_y,
-                client_w - 16,
-                28,
-                TRUE
-            );
-
+            media_player_layout_video();
             return 0;
         }
 
-        case WM_COMMAND: {
+        case WM_DRAWITEM: {
+            DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lParam;
+            if (dis && (dis->CtlID == 10 || dis->CtlID == 11 || dis->CtlID == 12)) {
+                media_player_draw_transport(dis);
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_COMMAND:
             switch (LOWORD(wParam)) {
                 case 10:
-                    if (media_player_control)
+                    if (media_player_backend == 1 && media_player_mf)
+                        media_player_mf->Play();
+                    else if (media_player_control)
                         media_player_control->Run();
                     return 0;
 
                 case 11:
-                    if (media_player_control)
+                    if (media_player_backend == 1 && media_player_mf)
+                        media_player_mf->Pause();
+                    else if (media_player_control)
                         media_player_control->Pause();
                     return 0;
 
                 case 12:
-                    if (media_player_control) {
+                    if (media_player_backend == 1 && media_player_mf)
+                        media_player_mf->Stop();
+                    else if (media_player_control) {
                         media_player_control->Stop();
-
-                        if (media_player_seeking) {
-                            LONGLONG zero = 0;
-
-                            media_player_seeking->SetPositions(
-                                &zero,
-                                AM_SEEKING_AbsolutePositioning,
-                                NULL,
-                                AM_SEEKING_NoPositioning
-                            );
-                        }
-
-                        media_player_update_controls();
+                        media_player_set_position_v2(0);
                     }
+                    media_player_update_controls();
                     return 0;
             }
-
             break;
-        }
 
         case WM_HSCROLL: {
-            HWND source =
-                (HWND)lParam;
+            HWND source = (HWND)lParam;
 
-            if (
-                source ==
-                hMediaPlayerSeek &&
-                media_player_seeking
-            ) {
-                int code =
-                    LOWORD(wParam);
-
-                if (
-                    code == TB_THUMBTRACK ||
-                    code == TB_THUMBPOSITION ||
-                    code == TB_ENDTRACK
-                ) {
+            if (source == hMediaPlayerSeek) {
+                int code = LOWORD(wParam);
+                if (code == TB_THUMBTRACK || code == TB_THUMBPOSITION || code == TB_ENDTRACK) {
                     media_player_user_seeking = true;
 
-                    int slider =
-                        (int)SendMessageW(
-                            hMediaPlayerSeek,
-                            TBM_GETPOS,
-                            0,
-                            0
-                        );
-
+                    int slider = (int)SendMessageW(hMediaPlayerSeek, TBM_GETPOS, 0, 0);
+                    LONGLONG position = 0;
                     LONGLONG duration = 0;
 
-                    if (
-                        SUCCEEDED(
-                            media_player_seeking->GetDuration(
-                                &duration
-                            )
-                        ) &&
-                        duration > 0
-                    ) {
-                        LONGLONG target =
-                            duration *
-                            slider /
-                            1000LL;
+                    if (media_player_get_time(&position, &duration))
+                        media_player_set_position_v2(duration * slider / 1000LL);
 
-                        media_player_seeking->SetPositions(
-                            &target,
-                            AM_SEEKING_AbsolutePositioning,
-                            NULL,
-                            AM_SEEKING_NoPositioning
-                        );
-                    }
-
-                    if (
-                        code == TB_ENDTRACK ||
-                        code == TB_THUMBPOSITION
-                    ) {
-                        media_player_user_seeking =
-                            false;
-                    }
+                    if (code == TB_ENDTRACK || code == TB_THUMBPOSITION)
+                        media_player_user_seeking = false;
 
                     media_player_update_controls();
                 }
-
                 return 0;
             }
 
-            if (
-                source ==
-                hMediaPlayerVolume &&
-                media_player_audio
-            ) {
-                int value =
-                    (int)SendMessageW(
-                        hMediaPlayerVolume,
-                        TBM_GETPOS,
-                        0,
-                        0
-                    );
+            if (source == hMediaPlayerVolume) {
+                int value = (int)SendMessageW(hMediaPlayerVolume, TBM_GETPOS, 0, 0);
 
-                long volume =
-                    value <= 0
-                        ? -10000
-                        : -5000 + value * 50;
-
-                if (volume > 0)
-                    volume = 0;
-
-                media_player_audio->put_Volume(
-                    volume
-                );
+                if (media_player_backend == 1 && media_player_mf) {
+                    media_player_mf->SetVolume((float)value / 100.0f);
+                } else if (media_player_audio) {
+                    long volume = value <= 0 ? -10000 : -5000 + value * 50;
+                    if (volume > 0)
+                        volume = 0;
+                    media_player_audio->put_Volume(volume);
+                }
 
                 return 0;
             }
@@ -953,11 +865,7 @@ static LRESULT CALLBACK TelegacyMediaPlayerWindow(
             return 0;
 
         case WM_DESTROY:
-            KillTimer(
-                hwnd,
-                MEDIA_PLAYER_TIMER
-            );
-
+            KillTimer(hwnd, MEDIA_PLAYER_TIMER);
             media_player_release_graph();
 
             hMediaPlayerWindow = NULL;
@@ -969,85 +877,53 @@ static LRESULT CALLBACK TelegacyMediaPlayerWindow(
             hMediaPlayerSeek = NULL;
             hMediaPlayerVolume = NULL;
             hMediaPlayerTime = NULL;
-
             return 0;
     }
 
-    return DefWindowProcW(
-        hwnd,
-        msg,
-        wParam,
-        lParam
-    );
-}
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}'''
 
-static bool media_player_open(
+s = replace_function(s, "static LRESULT CALLBACK TelegacyMediaPlayerWindow(", player_window_v2)
+
+player_open_v2 = r'''static bool media_player_open(
     const wchar_t* path,
     bool video
 ) {
     if (!path || !path[0])
         return false;
 
-    if (
-        hMediaPlayerWindow &&
-        IsWindow(hMediaPlayerWindow)
-    ) {
-        DestroyWindow(
-            hMediaPlayerWindow
-        );
-    }
+    // Music never opens a separate window anymore.
+    if (!video)
+        return media_inline_audio_toggle(path);
+
+    if (hMediaPlayerWindow && IsWindow(hMediaPlayerWindow))
+        DestroyWindow(hMediaPlayerWindow);
 
     media_player_release_graph();
+    media_player_is_video = true;
 
-    media_player_is_video =
-        video;
-
-    HINSTANCE instance =
-        GetModuleHandleW(NULL);
+    HINSTANCE instance = GetModuleHandleW(NULL);
 
     WNDCLASSEXW wc = {0};
-
     wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc =
-        TelegacyMediaPlayerWindow;
+    wc.lpfnWndProc = TelegacyMediaPlayerWindow;
     wc.hInstance = instance;
-    wc.hCursor =
-        LoadCursor(
-            NULL,
-            IDC_ARROW
-        );
-    wc.hbrBackground =
-        (HBRUSH)(
-            COLOR_BTNFACE + 1
-        );
-    wc.lpszClassName =
-        L"TelegacyMediaPlayer98";
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wc.lpszClassName = L"TelegacyMediaPlayer98";
 
     WNDCLASSEXW existing = {0};
     existing.cbSize = sizeof(existing);
 
-    if (!GetClassInfoExW(
-        instance,
-        wc.lpszClassName,
-        &existing
-    )) {
+    if (!GetClassInfoExW(instance, wc.lpszClassName, &existing)) {
         if (!RegisterClassExW(&wc))
             return false;
     }
 
-    const wchar_t* leaf =
-        wcsrchr(
-            path,
-            L'\\'
-        );
-
-    leaf =
-        leaf
-            ? leaf + 1
-            : path;
+    const wchar_t* leaf = wcsrchr(path, L'\\');
+    leaf = leaf ? leaf + 1 : path;
 
     wchar_t title[360] = {0};
-
     _snwprintf(
         title,
         ARRAYSIZE(title) - 1,
@@ -1055,60 +931,59 @@ static bool media_player_open(
         leaf
     );
 
-    int window_h =
-        video
-            ? 445
-            : 210;
-
-    hMediaPlayerWindow =
-        CreateWindowExW(
-            WS_EX_TOOLWINDOW,
-            wc.lpszClassName,
-            title,
-            WS_OVERLAPPEDWINDOW |
-            WS_VISIBLE,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            580,
-            window_h,
-            hMain,
-            NULL,
-            instance,
-            NULL
-        );
+    hMediaPlayerWindow = CreateWindowExW(
+        WS_EX_TOOLWINDOW,
+        wc.lpszClassName,
+        title,
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        600,
+        455,
+        hMain,
+        NULL,
+        instance,
+        NULL
+    );
 
     if (!hMediaPlayerWindow)
         return false;
 
-    if (
-        !video &&
-        hMediaPlayerInfo
-    ) {
-        wchar_t info[420] = {0};
-
-        _snwprintf(
-            info,
-            ARRAYSIZE(info) - 1,
-            L"Playing:\r\n%s",
-            leaf
-        );
-
-        SetWindowTextW(
-            hMediaPlayerInfo,
-            info
-        );
-    }
-
-    // Telegacy already uses COM/OLE, but initialize defensively for DirectShow.
     CoInitialize(NULL);
 
+    HRESULT mf_hr =
+        media_mf_create_player(
+            path,
+            hMediaPlayerVideoHost,
+            &media_player_mf
+        );
+
+    if (SUCCEEDED(mf_hr) && media_player_mf) {
+        media_player_backend = 1;
+        media_player_mf->SetVolume(0.85f);
+        mf_hr = media_player_mf->Play();
+    }
+
     diag_log(
-        "media player open video=%d path=%ls",
-        video ? 1 : 0,
+        "media player MFPlay hr=0x%08X path=%ls",
+        (unsigned int)mf_hr,
         path
     );
 
-    HRESULT hr =
+    if (SUCCEEDED(mf_hr) && media_player_mf) {
+        media_player_layout_video();
+        media_player_update_controls();
+        SetForegroundWindow(hMediaPlayerWindow);
+        return true;
+    }
+
+    if (media_player_mf) {
+        media_player_mf->Shutdown();
+        media_player_mf->Release();
+        media_player_mf = NULL;
+    }
+
+    HRESULT ds_hr =
         CoCreateInstance(
             CLSID_FilterGraph,
             NULL,
@@ -1117,157 +992,70 @@ static bool media_player_open(
             (void**)&media_player_graph
         );
 
-    diag_log(
-        "media player graph hr=0x%08X",
-        (unsigned int)hr
-    );
-
-    if (FAILED(hr)) {
-        MessageBoxW(
-            hMediaPlayerWindow,
-            L"Could not create the DirectShow filter graph.",
-            L"Telegacy Media Player",
-            MB_OK |
-            MB_ICONERROR
-        );
-
-        DestroyWindow(
-            hMediaPlayerWindow
-        );
-
-        return false;
-    }
-
-    hr =
-        media_player_graph->RenderFile(
-            path,
-            NULL
-        );
+    if (SUCCEEDED(ds_hr) && media_player_graph)
+        ds_hr = media_player_graph->RenderFile(path, NULL);
 
     diag_log(
-        "media player RenderFile hr=0x%08X",
-        (unsigned int)hr
+        "media player DirectShow fallback hr=0x%08X path=%ls",
+        (unsigned int)ds_hr,
+        path
     );
 
-    if (FAILED(hr)) {
-        wchar_t error[260];
+    if (SUCCEEDED(ds_hr) && media_player_graph) {
+        media_player_graph->QueryInterface(IID_IMediaControl, (void**)&media_player_control);
+        media_player_graph->QueryInterface(IID_IMediaSeeking, (void**)&media_player_seeking);
+        media_player_graph->QueryInterface(IID_IBasicAudio, (void**)&media_player_audio);
+        media_player_graph->QueryInterface(IID_IVideoWindow, (void**)&media_player_video);
 
-        _snwprintf(
-            error,
-            ARRAYSIZE(error) - 1,
-            L"Windows could not decode this media file.\r\n\r\nDirectShow error: 0x%08X\r\n\r\nInstall a compatible DirectShow codec/filter if needed.",
-            (unsigned int)hr
-        );
+        media_player_backend = 2;
 
-        error[
-            ARRAYSIZE(error) - 1
-        ] = 0;
-
-        MessageBoxW(
-            hMediaPlayerWindow,
-            error,
-            L"Telegacy Media Player",
-            MB_OK |
-            MB_ICONERROR
-        );
-
-        DestroyWindow(
-            hMediaPlayerWindow
-        );
-
-        return false;
-    }
-
-    media_player_graph->QueryInterface(
-        IID_IMediaControl,
-        (void**)&media_player_control
-    );
-
-    media_player_graph->QueryInterface(
-        IID_IMediaSeeking,
-        (void**)&media_player_seeking
-    );
-
-    media_player_graph->QueryInterface(
-        IID_IBasicAudio,
-        (void**)&media_player_audio
-    );
-
-    if (video) {
-        media_player_graph->QueryInterface(
-            IID_IVideoWindow,
-            (void**)&media_player_video
-        );
-
-        if (
-            media_player_video &&
-            hMediaPlayerVideoHost
-        ) {
-            media_player_video->put_Owner(
-                (OAHWND)hMediaPlayerVideoHost
-            );
-
-            media_player_video->put_WindowStyle(
-                WS_CHILD |
-                WS_CLIPSIBLINGS |
-                WS_CLIPCHILDREN
-            );
-
-            media_player_video->put_Visible(
-                OATRUE
-            );
-
-            media_player_layout_video();
-
-            PostMessageW(
-                hMediaPlayerWindow,
-                WM_SIZE,
-                0,
-                0
-            );
+        if (media_player_video && hMediaPlayerVideoHost) {
+            media_player_video->put_Owner((OAHWND)hMediaPlayerVideoHost);
+            media_player_video->put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
+            media_player_video->put_Visible(OATRUE);
         }
-    }
 
-    if (media_player_audio)
-        media_player_audio->put_Volume(-750);
+        if (media_player_audio)
+            media_player_audio->put_Volume(-750);
 
-    if (media_player_control) {
-        HRESULT run_hr =
+        if (media_player_control)
             media_player_control->Run();
 
-        diag_log(
-            "media player Run hr=0x%08X",
-            (unsigned int)run_hr
-        );
+        media_player_layout_video();
+        media_player_update_controls();
+        SetForegroundWindow(hMediaPlayerWindow);
+        return true;
     }
 
-    ShowWindow(
+    wchar_t error[420] = {0};
+    _snwprintf(
+        error,
+        ARRAYSIZE(error) - 1,
+        L"Windows could not decode this video.\r\n\r\nMedia Foundation: 0x%08X\r\nDirectShow: 0x%08X",
+        (unsigned int)mf_hr,
+        (unsigned int)ds_hr
+    );
+
+    MessageBoxW(
         hMediaPlayerWindow,
-        SW_SHOW
+        error,
+        L"Telegacy Media Player",
+        MB_OK | MB_ICONERROR
     );
 
-    SetForegroundWindow(
-        hMediaPlayerWindow
-    );
+    DestroyWindow(hMediaPlayerWindow);
+    return false;
+}'''
 
-    media_player_update_controls();
+s = replace_function(s, "static bool media_player_open(", player_open_v2)
 
-    return true;
-}
-
-
-static wchar_t media_chat_autoplay_path[MAX_PATH] = {0};
-static int media_chat_autoplay_kind = 0;
-
-static int media_player_kind_from_path(
+kind_v2 = r'''static int media_player_kind_from_path(
     const wchar_t* path
 ) {
     if (!path || !path[0])
         return 0;
 
-    const wchar_t* dot =
-        wcsrchr(path, L'.');
-
+    const wchar_t* dot = wcsrchr(path, L'.');
     if (!dot)
         return 0;
 
@@ -1283,55 +1071,18 @@ static int media_player_kind_from_path(
         return 1;
     }
 
-    if (
-        _wcsicmp(dot, L".mp3") == 0 ||
-        _wcsicmp(dot, L".m4a") == 0 ||
-        _wcsicmp(dot, L".aac") == 0 ||
-        _wcsicmp(dot, L".wav") == 0 ||
-        _wcsicmp(dot, L".wma") == 0 ||
-        _wcsicmp(dot, L".ogg") == 0 ||
-        _wcsicmp(dot, L".opus") == 0 ||
-        _wcsicmp(dot, L".flac") == 0
-    ) {
+    if (media_player_is_music_path(path))
         return 2;
-    }
 
     return 0;
-}
+}'''
 
-static void media_player_queue_chat_autoplay(
+s = replace_function(s, "static int media_player_kind_from_path(", kind_v2)
+
+try_chat_v2 = r'''static bool media_player_try_open_chat_path(
     const wchar_t* path
 ) {
-    int kind =
-        media_player_kind_from_path(path);
-
-    if (!kind)
-        return;
-
-    wcsncpy(
-        media_chat_autoplay_path,
-        path,
-        ARRAYSIZE(media_chat_autoplay_path) - 1
-    );
-
-    media_chat_autoplay_path[
-        ARRAYSIZE(media_chat_autoplay_path) - 1
-    ] = 0;
-
-    media_chat_autoplay_kind = kind;
-
-    diag_log(
-        "media player chat autoplay queued kind=%d path=%ls",
-        kind,
-        path
-    );
-}
-
-static bool media_player_try_open_chat_path(
-    const wchar_t* path
-) {
-    int kind =
-        media_player_kind_from_path(path);
+    int kind = media_player_kind_from_path(path);
 
     if (!kind)
         return false;
@@ -1339,13 +1090,15 @@ static bool media_player_try_open_chat_path(
     media_chat_autoplay_path[0] = 0;
     media_chat_autoplay_kind = 0;
 
-    return media_player_open(
-        path,
-        kind == 1
-    );
-}
+    if (kind == 2)
+        return media_inline_audio_toggle(path);
 
-void media_player_chat_download_complete(
+    return media_player_open(path, true);
+}'''
+
+s = replace_function(s, "static bool media_player_try_open_chat_path(", try_chat_v2)
+
+chat_complete_v2 = r'''void media_player_chat_download_complete(
     const wchar_t* path
 ) {
     if (
@@ -1353,2544 +1106,202 @@ void media_player_chat_download_complete(
         !path[0] ||
         !media_chat_autoplay_path[0] ||
         media_chat_autoplay_kind == 0 ||
-        _wcsicmp(
-            path,
-            media_chat_autoplay_path
-        ) != 0
+        _wcsicmp(path, media_chat_autoplay_path) != 0
     ) {
         return;
     }
 
-    int kind =
-        media_chat_autoplay_kind;
-
+    int kind = media_chat_autoplay_kind;
     media_chat_autoplay_path[0] = 0;
     media_chat_autoplay_kind = 0;
 
-    diag_log(
-        "media player chat download complete kind=%d path=%ls",
-        kind,
-        path
-    );
-
-    media_player_open(
-        path,
-        kind == 1
-    );
-}
-
-static const wchar_t* media_archive_safe_extension(
-    MediaArchiveItem* item
-) {
-    if (!item)
-        return L".bin";
-
-    if (
-        item->av_document.filename &&
-        item->av_document.filename[0]
-    ) {
-        const wchar_t* dot =
-            wcsrchr(
-                item->av_document.filename,
-                L'.'
-            );
-
-        if (
-            dot &&
-            wcslen(dot) >= 2 &&
-            wcslen(dot) <= 8
-        ) {
-            bool valid = true;
-
-            for (
-                const wchar_t* p = dot + 1;
-                *p;
-                p++
-            ) {
-                if (
-                    !(
-                        (*p >= L'0' && *p <= L'9') ||
-                        (*p >= L'A' && *p <= L'Z') ||
-                        (*p >= L'a' && *p <= L'z')
-                    )
-                ) {
-                    valid = false;
-                    break;
-                }
-            }
-
-            if (valid)
-                return dot;
-        }
-    }
-
-    return
-        item->media_kind == 1
-            ? L".mp4"
-            : L".mp3";
-}
-
-static bool media_archive_begin_av_download(
-    int item_index
-) {
-    if (
-        item_index < 0 ||
-        item_index >=
-            (int)media_archive_items.size()
-    ) {
-        return false;
-    }
-
-    MediaArchiveItem* item =
-        &media_archive_items[
-            item_index
-        ];
-
-    if (
-        item->media_kind == 0 ||
-        !item->has_document
-    ) {
-        diag_log(
-            "media av open rejected item=%d kind=%d has_document=%d",
-            item_index,
-            item->media_kind,
-            item->has_document ? 1 : 0
-        );
-
-        MessageBeep(
-            MB_ICONASTERISK
-        );
-
-        return false;
-    }
-
-    if (
-        item->file_path[0] &&
-        GetFileAttributesW(
-            item->file_path
-        ) != INVALID_FILE_ATTRIBUTES
-    ) {
-        return media_player_open(
-            item->file_path,
-            item->media_kind == 1
-        );
-    }
-
-    if (media_av_pending_item >= 0) {
-        MessageBeep(
-            MB_ICONASTERISK
-        );
-        return false;
-    }
-
-    wchar_t temp_dir[MAX_PATH] = {0};
-
-    DWORD temp_len =
-        GetTempPathW(
-            ARRAYSIZE(temp_dir),
-            temp_dir
-        );
-
-    if (
-        !temp_len ||
-        temp_len >=
-            ARRAYSIZE(temp_dir)
-    ) {
-        return false;
-    }
-
-    if (
-        wcslen(temp_dir) + 16 >=
-            ARRAYSIZE(temp_dir)
-    ) {
-        return false;
-    }
-
-    wcscat(
-        temp_dir,
-        L"TelegacyMedia"
-    );
-
-    CreateDirectoryW(
-        temp_dir,
-        NULL
-    );
-
-    const wchar_t* extension =
-        media_archive_safe_extension(
-            item
-        );
-
-    _snwprintf(
-        media_av_pending_path,
-        ARRAYSIZE(media_av_pending_path) - 1,
-        L"%s\\av_%016I64X%s",
-        temp_dir,
-        item->document_id,
-        extension
-    );
-
-    media_av_pending_path[
-        ARRAYSIZE(media_av_pending_path) - 1
-    ] = 0;
-
-    DeleteFileW(
-        media_av_pending_path
-    );
-
-    Document copy = {0};
-
-    copy.size =
-        item->av_document.size;
-
-    memcpy(
-        copy.id,
-        item->av_document.id,
-        8
-    );
-
-    memcpy(
-        copy.access_hash,
-        item->av_document.access_hash,
-        8
-    );
-
-    copy.dc =
-        item->av_document.dc;
-
-    copy.photo_size = 0;
-    copy.visible = false;
-
-    if (!item->av_document.file_reference) {
-        return false;
-    }
-
-    int file_ref_len =
-        tlstr_len(
-            item->av_document.file_reference,
-            true
-        );
-
-    if (file_ref_len <= 0)
-        return false;
-
-    copy.file_reference =
-        (BYTE*)malloc(
-            file_ref_len
-        );
-
-    if (!copy.file_reference)
-        return false;
-
-    memcpy(
-        copy.file_reference,
-        item->av_document.file_reference,
-        file_ref_len
-    );
-
-    copy.filename =
-        _wcsdup(
-            media_av_pending_path
-        );
-
-    if (!copy.filename) {
-        free(
-            copy.file_reference
-        );
-        return false;
-    }
-
-    downloading_docs.push_back(
-        copy
-    );
-
-    media_av_pending_item =
-        item_index;
-
-    diag_log(
-        "media av download begin kind=%d item=%d size=%I64d",
-        item->media_kind,
-        item_index,
-        item->av_document.size
-    );
-
-    download_file(
-        &dcInfoMain,
-        &downloading_docs.back()
-    );
-
-    return true;
-}
-
-void media_archive_av_download_complete(
-    const wchar_t* path
-) {
-    if (
-        media_av_pending_item < 0 ||
-        !path ||
-        !path[0] ||
-        wcscmp(
-            path,
-            media_av_pending_path
-        ) != 0
-    ) {
-        return;
-    }
-
-    int item_index =
-        media_av_pending_item;
-
-    media_av_pending_item = -1;
-
-    if (
-        item_index >= 0 &&
-        item_index <
-            (int)media_archive_items.size()
-    ) {
-        wcsncpy(
-            media_archive_items[
-                item_index
-            ].file_path,
-            path,
-            ARRAYSIZE(
-                media_archive_items[
-                    item_index
-                ].file_path
-            ) - 1
-        );
-
-        media_archive_items[
-            item_index
-        ].file_path[
-            ARRAYSIZE(
-                media_archive_items[
-                    item_index
-                ].file_path
-            ) - 1
-        ] = 0;
-    }
-
-    diag_log(
-        "media av download complete item=%d",
-        item_index
-    );
-
-    if (
-        hMediaArchiveWindow &&
-        IsWindow(
-            hMediaArchiveWindow
-        )
-    ) {
-        PostMessageW(
-            hMediaArchiveWindow,
-            WM_APP + 91,
-            (WPARAM)item_index,
-            0
-        );
-    }
-}
-
-void media_archive_add_av_document(
-    Document* document,
-    int message_id,
-    int kind,
-    const wchar_t* display_name,
-    int duration
-) {
-    if (
-        !document ||
-        message_id <= 0 ||
-        (kind != 1 && kind != 2)
-    ) {
-        return;
-    }
-
-    __int64 document_id = 0;
-
-    memcpy(
-        &document_id,
-        document->id,
-        8
-    );
-
-    for (
-        int i = 0;
-        i < (int)media_archive_items.size();
-        i++
-    ) {
-        if (
-            media_archive_items[i].document_id ==
-                document_id &&
-            media_archive_items[i].media_kind ==
-                kind
-        ) {
-            return;
-        }
-    }
-
-    MediaArchiveItem item = {0};
-
-    item.document_id =
-        document_id;
-
-    item.message_id =
-        message_id;
-
-    item.page_index =
-        media_archive_request_page;
-
-    item.media_kind = kind;
-    item.duration = duration;
-    item.has_document = true;
-
-    item.av_document =
-        *document;
-
-    item.av_document.filename =
-        document->filename
-            ? _wcsdup(
-                document->filename
-            )
-            : NULL;
-
-    int file_ref_len =
-        document->file_reference
-            ? tlstr_len(
-                document->file_reference,
-                true
-            )
-            : 0;
-
-    item.av_document.file_reference = NULL;
-
-    if (file_ref_len > 0) {
-        item.av_document.file_reference =
-            (BYTE*)malloc(
-                file_ref_len
-            );
-
-        if (
-            item.av_document.file_reference
-        ) {
-            memcpy(
-                item.av_document.file_reference,
-                document->file_reference,
-                file_ref_len
-            );
-        }
-    }
-
-    if (
-        display_name &&
-        display_name[0]
-    ) {
-        wcsncpy(
-            item.display_name,
-            display_name,
-            ARRAYSIZE(
-                item.display_name
-            ) - 1
-        );
-    } else if (
-        document->filename &&
-        document->filename[0]
-    ) {
-        wcsncpy(
-            item.display_name,
-            document->filename,
-            ARRAYSIZE(
-                item.display_name
-            ) - 1
-        );
-    } else {
-        _snwprintf(
-            item.display_name,
-            ARRAYSIZE(
-                item.display_name
-            ) - 1,
-            kind == 1
-                ? L"Video #%d"
-                : L"Audio #%d",
-            message_id
-        );
-    }
-
-    item.display_name[
-        ARRAYSIZE(
-            item.display_name
-        ) - 1
-    ] = 0;
-
-    media_archive_items.push_back(
-        item
-    );
-}
-
-void media_archive_finish_av_page() {
-    media_archive_page_loading = false;
-    media_archive_refresh();
-}
-
-static void media_archive_reset_for_kind(
-    int kind
-) {
-    if (
-        kind < 0 ||
-        kind > 2
-    ) {
-        return;
-    }
-
-    media_archive_kind =
-        kind;
-
-    media_archive_clear();
-
-    media_archive_server_active = true;
-    media_archive_search_pending = false;
-    media_archive_page_loading = false;
-
-    media_archive_next_offset_id = 0;
-    media_archive_loaded_count = 0;
-    media_archive_total = 0;
-    media_archive_no_more = false;
-
-    media_archive_current_page = 0;
-    media_archive_request_page = 0;
-    media_archive_previous_page = 0;
-    media_archive_highest_page = 0;
-
-    media_archive_page_offsets.clear();
-    media_archive_page_offsets.push_back(0);
-
-    media_archive_loaded_pages.clear();
-
-    media_archive_refresh();
-
-    media_archive_request_server_page(
-        0
-    );
-}
-
-'''
-
-s = s[:pos] + runtime + s[pos:]
-
-request_sig = "static bool media_archive_request_server_page_ex("
-req_start, req_end = function_range(s, request_sig)
-req_func = s[req_start:req_end]
-
-old_filter = r'''    // inputMessagesFilterPhotos#9609a51c
-    write_le(
-        unenc_query + offset,
-        0x9609a51c,
-        4
-    );'''
-
-new_filter = r'''    // Filter is selected by the active Media tab.
-    write_le(
-        unenc_query + offset,
-        media_archive_filter_constructor(),
-        4
-    );'''
-
-if old_filter not in req_func:
-    old_filter = r'''    write_le(
-        unenc_query + offset,
-        0x9609a51c,
-        4
-    );'''
-
-if old_filter not in req_func:
-    raise SystemExit(
-        "Could not locate Photos filter in Media request function."
-    )
-
-req_func = req_func.replace(
-    old_filter,
-    new_filter,
-    1
-)
-
-s = s[:req_start] + req_func + s[req_end:]
-
-refresh = r'''static void media_archive_refresh() {
-    if (!hMediaArchiveList)
-        return;
-
-    // Build each update off-screen and present it once. This prevents the
-    // classic ListView from visibly erasing/recreating itself for every item.
-    SendMessageW(
-        hMediaArchiveList,
-        WM_SETREDRAW,
-        FALSE,
-        0
-    );
-
-    ListView_DeleteAllItems(
-        hMediaArchiveList
-    );
-
-    LONG_PTR style =
-        GetWindowLongPtrW(
-            hMediaArchiveList,
-            GWL_STYLE
-        );
-
-    style &= ~LVS_TYPEMASK;
-
-    style |=
-        media_archive_kind == 0
-            ? LVS_ICON
-            : LVS_LIST;
-
-    SetWindowLongPtrW(
-        hMediaArchiveList,
-        GWL_STYLE,
-        style
-    );
-
-    SetWindowPos(
-        hMediaArchiveList,
-        NULL,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE |
-        SWP_NOSIZE |
-        SWP_NOZORDER |
-        SWP_NOACTIVATE |
-        SWP_FRAMECHANGED
-    );
-
-    if (hMediaArchiveImages) {
-        ListView_SetImageList(
-            hMediaArchiveList,
-            NULL,
-            LVSIL_NORMAL
-        );
-
-        ListView_SetImageList(
-            hMediaArchiveList,
-            NULL,
-            LVSIL_SMALL
-        );
-
-        ImageList_Destroy(
-            hMediaArchiveImages
-        );
-
-        hMediaArchiveImages = NULL;
-    }
-
-    if (media_archive_kind == 0) {
-        hMediaArchiveImages =
-            ImageList_Create(
-                96,
-                96,
-                ILC_COLOR32,
-                20,
-                16
-            );
-
-        if (hMediaArchiveImages) {
-            ListView_SetImageList(
-                hMediaArchiveList,
-                hMediaArchiveImages,
-                LVSIL_NORMAL
-            );
-
-            SendMessage(
-                hMediaArchiveList,
-                LVM_SETICONSPACING,
-                0,
-                MAKELPARAM(112, 118)
-            );
-        }
-    }
-
-    for (
-        int i = 0;
-        i < (int)media_archive_items.size();
-        i++
-    ) {
-        MediaArchiveItem* archive_item =
-            &media_archive_items[i];
-
-        if (
-            archive_item->media_kind !=
-                media_archive_kind ||
-            archive_item->page_index !=
-                media_archive_current_page
-        ) {
-            continue;
-        }
-
-        LVITEMW item = {0};
-
-        item.iItem =
-            ListView_GetItemCount(
-                hMediaArchiveList
-            );
-
-        item.lParam = i;
-
-        wchar_t label[340] = {0};
-
-        if (media_archive_kind == 0) {
-            HBITMAP thumb =
-                media_archive_make_thumbnail(
-                    archive_item->bitmap,
-                    96
-                );
-
-            if (!thumb || !hMediaArchiveImages) {
-                if (thumb)
-                    DeleteObject(thumb);
-                continue;
-            }
-
-            int image_index =
-                ImageList_Add(
-                    hMediaArchiveImages,
-                    thumb,
-                    NULL
-                );
-
-            DeleteObject(thumb);
-
-            if (image_index < 0)
-                continue;
-
-            if (archive_item->message_id) {
-                _snwprintf(
-                    label,
-                    ARRAYSIZE(label) - 1,
-                    L"#%d",
-                    archive_item->message_id
-                );
-            }
-
-            item.mask =
-                LVIF_IMAGE |
-                LVIF_PARAM |
-                LVIF_TEXT;
-
-            item.iImage =
-                image_index;
-        } else {
-            if (archive_item->duration > 0) {
-                _snwprintf(
-                    label,
-                    ARRAYSIZE(label) - 1,
-                    L"%s   [%02d:%02d]",
-                    archive_item->display_name,
-                    archive_item->duration / 60,
-                    archive_item->duration % 60
-                );
-            } else {
-                wcsncpy(
-                    label,
-                    archive_item->display_name,
-                    ARRAYSIZE(label) - 1
-                );
-            }
-
-            item.mask =
-                LVIF_PARAM |
-                LVIF_TEXT;
-        }
-
-        label[
-            ARRAYSIZE(label) - 1
-        ] = 0;
-
-        item.pszText =
-            label;
-
-        SendMessageW(
-            hMediaArchiveList,
-            LVM_INSERTITEMW,
-            0,
-            (LPARAM)&item
-        );
-    }
-
-    media_archive_update_nav();
-
-    SendMessageW(
-        hMediaArchiveList,
-        WM_SETREDRAW,
-        TRUE,
-        0
-    );
-
-    RedrawWindow(
-        hMediaArchiveList,
-        NULL,
-        NULL,
-        RDW_INVALIDATE |
-        RDW_ERASE |
-        RDW_UPDATENOW |
-        RDW_ALLCHILDREN
-    );
+    if (kind == 2)
+        media_inline_audio_toggle(path);
+    else if (kind == 1)
+        media_player_open(path, true);
 }'''
 
-s = replace_function(
-    s,
-    "static void media_archive_refresh() {",
-    refresh
-)
+s = replace_function(s, "void media_player_chat_download_complete(", chat_complete_v2)
 
-open_item = r'''static void media_archive_open_item(
-    int item_index
-) {
-    if (
-        item_index < 0 ||
-        item_index >=
-            (int)media_archive_items.size()
-    ) {
-        return;
+# Prevent a Media jump from destroying the gallery cache.
+clear_v2 = r'''void message_search_clear_chat_view() {
+    for (int i = (int)documents.size() - 1; i >= 0; i--) {
+        free(documents[i].filename);
+        free(documents[i].file_reference);
     }
 
-    MediaArchiveItem* item =
-        &media_archive_items[
-            item_index
-        ];
+    documents.clear();
 
-    if (item->media_kind != 0) {
-        media_archive_begin_av_download(
-            item_index
-        );
+    for (int i = (int)links.size() - 1; i >= 0; i--)
+        free(links[i].lpstrText);
 
-        return;
-    }
+    links.clear();
+    messages.clear();
 
-    const wchar_t* path =
-        item->file_path;
+    memset(group_id_tofront, 0, sizeof(group_id_tofront));
+    memset(group_id, 0, sizeof(group_id));
 
-    if (!path || !path[0]) {
-        MessageBeep(
-            MB_ICONASTERISK
-        );
-        return;
-    }
+    if (chat)
+        SendMessageW(chat, WM_SETTEXT, 0, (LPARAM)L"");
 
-    typedef HINSTANCE (
-        WINAPI *ShellExecuteWProc
-    )(
-        HWND,
-        LPCWSTR,
-        LPCWSTR,
-        LPCWSTR,
-        LPCWSTR,
-        INT
-    );
-
-    HMODULE shell =
-        LoadLibraryW(
-            L"shell32.dll"
-        );
-
-    if (!shell) {
-        MessageBeep(
-            MB_ICONASTERISK
-        );
-        return;
-    }
-
-    ShellExecuteWProc proc =
-        (ShellExecuteWProc)GetProcAddress(
-            shell,
-            "ShellExecuteW"
-        );
-
-    if (proc) {
-        HINSTANCE result =
-            proc(
-                hMediaArchiveWindow,
-                L"open",
-                path,
-                NULL,
-                NULL,
-                SW_SHOWNORMAL
-            );
-
-        if ((INT_PTR)result <= 32)
-            MessageBeep(MB_ICONASTERISK);
-    }
-
-    FreeLibrary(shell);
+    if (!media_archive_preserve_on_chat_clear)
+        media_archive_clear();
 }'''
 
-s = replace_function(
-    s,
-    "static void media_archive_open_item(",
-    open_item
-)
-
-clear_start, clear_end = function_range(
-    s,
-    "void media_archive_clear()"
-)
-clear_func = s[clear_start:clear_end]
-
-cleanup_anchor = r'''        if (
-            media_archive_items[i].bitmap
-        ) {'''
-
-cleanup_new = r'''        if (
-            media_archive_items[i].has_document
-        ) {
-            free(
-                media_archive_items[i].av_document.filename
-            );
-
-            free(
-                media_archive_items[i].av_document.file_reference
-            );
-
-            media_archive_items[i].av_document.filename = NULL;
-            media_archive_items[i].av_document.file_reference = NULL;
-        }
-
-        if (
-            media_archive_items[i].bitmap
-        ) {'''
-
-if cleanup_anchor not in clear_func:
-    raise SystemExit(
-        "Could not locate bitmap cleanup in media_archive_clear()."
-    )
-
-clear_func = clear_func.replace(
-    cleanup_anchor,
-    cleanup_new,
-    1
-)
-
-delete_block = r'''        if (
-            media_archive_items[i].file_path[0]
-        ) {
-            DeleteFileW(
-                media_archive_items[i].file_path
-            );
-        }'''
-
-delete_new = r'''        if (
-            media_archive_items[i].media_kind == 0 &&
-            media_archive_items[i].file_path[0]
-        ) {
-            DeleteFileW(
-                media_archive_items[i].file_path
-            );
-        }'''
-
-if delete_block in clear_func:
-    clear_func = clear_func.replace(
-        delete_block,
-        delete_new,
-        1
-    )
-
-s = s[:clear_start] + clear_func + s[clear_end:]
-
-window_proc = r'''static LRESULT CALLBACK TelegacyMediaArchiveWindow(
-    HWND hwnd,
-    UINT msg,
-    WPARAM wParam,
-    LPARAM lParam
-) {
-    switch (msg) {
-        case WM_CREATE: {
-            HFONT font =
-                (HFONT)GetStockObject(
-                    DEFAULT_GUI_FONT
-                );
-
-            hMediaArchiveTabs =
-                CreateWindowExW(
-                    0,
-                    WC_TABCONTROLW,
-                    L"",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    WS_TABSTOP |
-                    TCS_TABS,
-                    8,
-                    7,
-                    360,
-                    27,
-                    hwnd,
-                    (HMENU)20,
-                    NULL,
-                    NULL
-                );
-
-            TCITEMW tab = {0};
-            tab.mask = TCIF_TEXT;
-
-            tab.pszText =
-                (LPWSTR)L"\u0418\u0437\u043E\u0431\u0440\u0430\u0436\u0435\u043D\u0438\u044F";
-            TabCtrl_InsertItem(
-                hMediaArchiveTabs,
-                0,
-                &tab
-            );
-
-            tab.pszText =
-                (LPWSTR)L"\u0412\u0438\u0434\u0435\u043E";
-            TabCtrl_InsertItem(
-                hMediaArchiveTabs,
-                1,
-                &tab
-            );
-
-            tab.pszText =
-                (LPWSTR)L"\u041C\u0443\u0437\u044B\u043A\u0430";
-            TabCtrl_InsertItem(
-                hMediaArchiveTabs,
-                2,
-                &tab
-            );
-
-            TabCtrl_SetCurSel(
-                hMediaArchiveTabs,
-                media_archive_kind
-            );
-
-            hMediaArchiveNewer =
-                CreateWindowW(
-                    L"BUTTON",
-                    L"<-",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                    8, 40, 44, 24,
-                    hwnd,
-                    (HMENU)1,
-                    NULL,
-                    NULL
-                );
-
-            hMediaArchivePageEdit =
-                CreateWindowExW(
-                    WS_EX_CLIENTEDGE,
-                    L"EDIT",
-                    L"1",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    WS_TABSTOP |
-                    ES_NUMBER |
-                    ES_CENTER |
-                    ES_AUTOHSCROLL,
-                    57, 40, 48, 24,
-                    hwnd,
-                    (HMENU)3,
-                    NULL,
-                    NULL
-                );
-
-            hMediaArchivePageTotal =
-                CreateWindowW(
-                    L"STATIC",
-                    L"/ ?",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    SS_LEFT |
-                    SS_CENTERIMAGE,
-                    111, 40, 65, 24,
-                    hwnd,
-                    (HMENU)4,
-                    NULL,
-                    NULL
-                );
-
-            hMediaArchivePageGo =
-                CreateWindowW(
-                    L"BUTTON",
-                    L"\u041E\u041A",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    WS_TABSTOP |
-                    BS_PUSHBUTTON,
-                    181, 40, 42, 24,
-                    hwnd,
-                    (HMENU)5,
-                    NULL,
-                    NULL
-                );
-
-            hMediaArchiveOlder =
-                CreateWindowW(
-                    L"BUTTON",
-                    L"->",
-                    WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-                    228, 40, 44, 24,
-                    hwnd,
-                    (HMENU)2,
-                    NULL,
-                    NULL
-                );
-
-            hMediaArchiveList =
-                CreateWindowExW(
-                    WS_EX_CLIENTEDGE,
-                    WC_LISTVIEWW,
-                    L"",
-                    WS_CHILD |
-                    WS_VISIBLE |
-                    WS_VSCROLL |
-                    LVS_ICON |
-                    LVS_SINGLESEL |
-                    LVS_NOLABELWRAP,
-                    8, 70, 580, 378,
-                    hwnd,
-                    (HMENU)6,
-                    NULL,
-                    NULL
-                );
-
-            HWND controls[] = {
-                hMediaArchiveTabs,
-                hMediaArchiveNewer,
-                hMediaArchiveOlder,
-                hMediaArchivePageEdit,
-                hMediaArchivePageTotal,
-                hMediaArchivePageGo
-            };
-
-            for (
-                int i = 0;
-                i < ARRAYSIZE(controls);
-                i++
-            ) {
-                if (controls[i]) {
-                    SendMessageW(
-                        controls[i],
-                        WM_SETFONT,
-                        (WPARAM)font,
-                        TRUE
-                    );
-                }
-            }
-
-            SendMessageW(
-                hMediaArchivePageEdit,
-                EM_SETLIMITTEXT,
-                7,
-                0
-            );
-
-            media_archive_page_edit_original_proc =
-                (WNDPROC)SetWindowLongPtrW(
-                    hMediaArchivePageEdit,
-                    GWLP_WNDPROC,
-                    (LONG_PTR)TelegacyMediaPageEditProc
-                );
-
-            // ListView double-buffer flag is 0x00010000.  Older commctrl.h
-            // headers used by this x86 build do not always declare the name,
-            // even though the control on modern Windows supports the flag.
-            SendMessageW(
-                hMediaArchiveList,
-                LVM_SETEXTENDEDLISTVIEWSTYLE,
-                0,
-                LVS_EX_BORDERSELECT |
-                LVS_EX_FULLROWSELECT |
-                0x00010000
-            );
-
-            media_archive_refresh();
-            media_archive_update_nav();
-
-            return 0;
-        }
-
-        case WM_SIZE: {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-
-            MoveWindow(
-                hMediaArchiveTabs,
-                8, 7,
-                rc.right - 16,
-                27,
-                TRUE
-            );
-
-            MoveWindow(hMediaArchiveNewer, 8, 40, 44, 24, TRUE);
-            MoveWindow(hMediaArchivePageEdit, 57, 40, 48, 24, TRUE);
-            MoveWindow(hMediaArchivePageTotal, 111, 40, 65, 24, TRUE);
-            MoveWindow(hMediaArchivePageGo, 181, 40, 42, 24, TRUE);
-            MoveWindow(hMediaArchiveOlder, 228, 40, 44, 24, TRUE);
-
-            MoveWindow(
-                hMediaArchiveList,
-                8, 70,
-                rc.right - 16,
-                rc.bottom - 78,
-                TRUE
-            );
-
-            return 0;
-        }
-
-        case WM_COMMAND: {
-            int command = LOWORD(wParam);
-
-            if (command == 1) {
-                media_archive_navigate_to_page(
-                    media_archive_current_page - 1
-                );
-                return 0;
-            }
-
-            if (command == 2) {
-                media_archive_navigate_to_page(
-                    media_archive_current_page + 1
-                );
-                return 0;
-            }
-
-            if (command == 5) {
-                wchar_t page_text[32] = {0};
-
-                GetWindowTextW(
-                    hMediaArchivePageEdit,
-                    page_text,
-                    ARRAYSIZE(page_text)
-                );
-
-                int requested =
-                    _wtoi(page_text);
-
-                int total_pages =
-                    media_archive_total_pages();
-
-                if (
-                    requested < 1 ||
-                    total_pages <= 0 ||
-                    requested > total_pages
-                ) {
-                    MessageBeep(
-                        MB_ICONASTERISK
-                    );
-
-                    media_archive_update_nav();
-                    return 0;
-                }
-
-                media_archive_navigate_to_page(
-                    requested - 1
-                );
-
-                return 0;
-            }
-
-            break;
-        }
-
-        case WM_NOTIFY: {
-            LPNMHDR hdr =
-                (LPNMHDR)lParam;
-
-            if (
-                hdr &&
-                hdr->hwndFrom ==
-                    hMediaArchiveTabs &&
-                hdr->code ==
-                    TCN_SELCHANGE
-            ) {
-                int selected =
-                    TabCtrl_GetCurSel(
-                        hMediaArchiveTabs
-                    );
-
-                if (
-                    selected >= 0 &&
-                    selected <= 2 &&
-                    selected != media_archive_kind
-                ) {
-                    diag_log(
-                        "media tab switch old=%d new=%d",
-                        media_archive_kind,
-                        selected
-                    );
-
-                    media_archive_reset_for_kind(
-                        selected
-                    );
-                }
-
-                return 0;
-            }
-
-            if (
-                hdr &&
-                hdr->hwndFrom ==
-                    hMediaArchiveList &&
-                hdr->code ==
-                    NM_CLICK
-            ) {
-                LPNMITEMACTIVATE activate =
-                    (LPNMITEMACTIVATE)lParam;
-
-                if (
-                    activate &&
-                    activate->iItem >= 0
-                ) {
-                    LVITEMW item = {0};
-                    item.mask = LVIF_PARAM;
-                    item.iItem = activate->iItem;
-
-                    if (
-                        SendMessageW(
-                            hMediaArchiveList,
-                            LVM_GETITEMW,
-                            0,
-                            (LPARAM)&item
-                        )
-                    ) {
-                        media_archive_pending_click_item =
-                            (int)item.lParam;
-
-                        KillTimer(
-                            hwnd,
-                            MEDIA_ARCHIVE_CLICK_TIMER
-                        );
-
-                        SetTimer(
-                            hwnd,
-                            MEDIA_ARCHIVE_CLICK_TIMER,
-                            GetDoubleClickTime() + 120,
-                            NULL
-                        );
-                    }
-                }
-
-                return 0;
-            }
-
-            if (
-                hdr &&
-                hdr->hwndFrom ==
-                    hMediaArchiveList &&
-                hdr->code ==
-                    NM_DBLCLK
-            ) {
-                KillTimer(
-                    hwnd,
-                    MEDIA_ARCHIVE_CLICK_TIMER
-                );
-
-                media_archive_pending_click_item =
-                    -1;
-
-                LPNMITEMACTIVATE activate =
-                    (LPNMITEMACTIVATE)lParam;
-
-                if (
-                    activate &&
-                    activate->iItem >= 0
-                ) {
-                    LVITEMW item = {0};
-                    item.mask = LVIF_PARAM;
-                    item.iItem = activate->iItem;
-
-                    if (
-                        SendMessageW(
-                            hMediaArchiveList,
-                            LVM_GETITEMW,
-                            0,
-                            (LPARAM)&item
-                        )
-                    ) {
-                        media_archive_open_item(
-                            (int)item.lParam
-                        );
-                    }
-                }
-
-                return 0;
-            }
-
-            break;
-        }
-
-        case WM_TIMER:
-            if (
-                wParam ==
-                MEDIA_ARCHIVE_CLICK_TIMER
-            ) {
-                KillTimer(
-                    hwnd,
-                    MEDIA_ARCHIVE_CLICK_TIMER
-                );
-
-                int item_index =
-                    media_archive_pending_click_item;
-
-                media_archive_pending_click_item =
-                    -1;
-
-                if (
-                    item_index >= 0 &&
-                    item_index <
-                        (int)media_archive_items.size()
-                ) {
-                    media_archive_jump_to_message(
-                        media_archive_items[
-                            item_index
-                        ].message_id
-                    );
-                }
-
-                return 0;
-            }
-            break;
-
-        case WM_APP + 91: {
-            int item_index =
-                (int)wParam;
-
-            if (
-                item_index >= 0 &&
-                item_index <
-                    (int)media_archive_items.size()
-            ) {
-                MediaArchiveItem* item =
-                    &media_archive_items[
-                        item_index
-                    ];
-
-                if (
-                    item->media_kind != 0 &&
-                    item->file_path[0]
-                ) {
-                    media_player_open(
-                        item->file_path,
-                        item->media_kind == 1
-                    );
-                }
-            }
-
-            return 0;
-        }
-
-        case WM_DESTROY: {
-            KillTimer(
-                hwnd,
-                MEDIA_ARCHIVE_CLICK_TIMER
-            );
-
-            media_archive_pending_click_item =
-                -1;
-
-            if (hMediaArchiveImages) {
-                ImageList_Destroy(
-                    hMediaArchiveImages
-                );
-
-                hMediaArchiveImages = NULL;
-            }
-
-            hMediaArchiveList = NULL;
-            hMediaArchiveTabs = NULL;
-            hMediaArchiveNewer = NULL;
-            hMediaArchiveOlder = NULL;
-            hMediaArchivePageEdit = NULL;
-            hMediaArchivePageTotal = NULL;
-            hMediaArchivePageGo = NULL;
-            hMediaArchiveWindow = NULL;
-            media_archive_page_edit_original_proc = NULL;
-
-            return 0;
-        }
-    }
-
-    return DefWindowProcW(
-        hwnd,
-        msg,
-        wParam,
-        lParam
-    );
-}'''
-
-s = replace_function(
-    s,
-    "static LRESULT CALLBACK TelegacyMediaArchiveWindow(",
-    window_proc
-)
-
-show_start, show_end = function_range(
-    s,
-    "void media_archive_show()"
-)
-show_func = s[show_start:show_end]
-
-# Preserve the last selected tab. Never force media_archive_kind=0 after
-# CreateWindow(), because WM_CREATE has already selected the visible tab.
-show_func = show_func.replace(
-    "        media_archive_kind = 0;\n",
-    ""
-)
-
-existing_refresh = r'''        media_archive_refresh();
-
-        ShowWindow(
-            hMediaArchiveWindow,
-            SW_SHOW
-        );'''
-
-existing_refresh_new = r'''        if (hMediaArchiveTabs) {
-            TabCtrl_SetCurSel(
-                hMediaArchiveTabs,
-                media_archive_kind
-            );
-        }
-
-        media_archive_refresh();
-
-        ShowWindow(
-            hMediaArchiveWindow,
-            SW_SHOW
-        );'''
-
-if existing_refresh in show_func:
-    show_func = show_func.replace(
-        existing_refresh,
-        existing_refresh_new,
-        1
-    )
-
-s = s[:show_start] + show_func + s[show_end:]
-
-
-# Keep the Media window open and active when a single click performs
-# "go to message". The conversation scrolls behind the tool window.
-jump_start, jump_end = function_range(
-    s,
-    "void media_archive_jump_to_message("
-)
-jump_func = s[jump_start:jump_end]
-
-local_focus_block = r'''        if (
-            hMediaArchiveWindow &&
-            IsWindow(hMediaArchiveWindow)
-        ) {
-            DestroyWindow(
-                hMediaArchiveWindow
-            );
-        }
-
-        SetForegroundWindow(
-            hMain
-        );
-
-        SetFocus(chat);
-
-'''
-
-if local_focus_block not in jump_func:
-    raise SystemExit(
-        "Could not locate local Media jump close/focus block."
-    )
-
-jump_func = jump_func.replace(
-    local_focus_block,
-    r'''        if (
-            hMediaArchiveWindow &&
-            IsWindow(hMediaArchiveWindow)
-        ) {
-            SetForegroundWindow(
-                hMediaArchiveWindow
-            );
-
-            if (hMediaArchiveList) {
-                SetFocus(
-                    hMediaArchiveList
-                );
-            }
-        }
-
-''',
-    1
-)
-
-network_focus_block = r'''    // A click means "go to message"; close the tool window and bring the
-    // conversation forward. A double-click is delayed/cancelled separately.
-    if (
-        hMediaArchiveWindow &&
-        IsWindow(hMediaArchiveWindow)
-    ) {
-        DestroyWindow(
-            hMediaArchiveWindow
-        );
-    }
-
-    SetForegroundWindow(
-        hMain
-    );
-
-'''
-
-if network_focus_block not in jump_func:
-    raise SystemExit(
-        "Could not locate network Media jump close/focus block."
-    )
-
-jump_func = jump_func.replace(
-    network_focus_block,
-    r'''    // Keep Media active while the requested history context is applied
-    // to the conversation behind it.
-    if (
-        hMediaArchiveWindow &&
-        IsWindow(hMediaArchiveWindow)
-    ) {
-        SetForegroundWindow(
-            hMediaArchiveWindow
-        );
-
-        if (hMediaArchiveList) {
-            SetFocus(
-                hMediaArchiveList
-            );
-        }
-    }
-
-''',
-    1
-)
-
-s = s[:jump_start] + jump_func + s[jump_end:]
-
-
-finish_start, finish_end = function_range(
-    s,
-    "void media_archive_finish_jump()"
-)
-finish_func = s[finish_start:finish_end]
-
-finish_focus_block = r'''        SetForegroundWindow(
-            hMain
-        );
-
-        SetFocus(chat);
-
-'''
-
-if finish_focus_block not in finish_func:
-    raise SystemExit(
-        "Could not locate Media finish-jump focus block."
-    )
-
-finish_func = finish_func.replace(
-    finish_focus_block,
-    r'''        if (
-            hMediaArchiveWindow &&
-            IsWindow(hMediaArchiveWindow)
-        ) {
-            SetForegroundWindow(
-                hMediaArchiveWindow
-            );
-
-            if (hMediaArchiveList) {
-                SetFocus(
-                    hMediaArchiveList
-                );
-            }
-        }
-
-''',
-    1
-)
-
-s = s[:finish_start] + finish_func + s[finish_end:]
-
-
-error_start, error_end = function_range(
-    s,
-    "void media_archive_handle_jump_rpc_error("
-)
-error_func = s[error_start:error_end]
-
-error_focus_block = r'''    SetForegroundWindow(
-        hMain
-    );
-
-'''
-
-if error_focus_block in error_func:
-    error_func = error_func.replace(
-        error_focus_block,
-        "",
-        1
-    )
-
-s = s[:error_start] + error_func + s[error_end:]
-
-
-# Also route normal chat audio/video attachments through the built-in player.
-# Previously the Media tab used media_player_open(), but the RichEdit chat
-# double-click path still called ShellExecute().
-
-chat_open_old = '\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}'
-
-chat_open_new = '\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif (!media_player_try_open_chat_path(documents[i].filename)) {\n\t\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}'
-
-if chat_open_old not in s:
-    raise SystemExit(
-        "Could not locate normal chat document ShellExecute double-click block."
-    )
-
-s = s.replace(
-    chat_open_old,
-    chat_open_new,
-    1
-)
-
-chat_found_old = '\t\t\t\tif (documents[i].min <= sel_char && documents[i].max >= sel_char) {\n\t\t\t\t\tfound = true;\n\t\t\t\t\tFILE* f = _wfopen(documents[i].filename, L"rb");'
-
-chat_found_new = '\t\t\t\tif (documents[i].min <= sel_char && documents[i].max >= sel_char) {\n\t\t\t\t\tfound = true;\n\n\t\t\t\t\tif (\n\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n\n\t\t\t\t\tFILE* f = _wfopen(documents[i].filename, L"rb");'
-
-if chat_found_old not in s:
-    raise SystemExit(
-        "Could not locate chat document match block."
-    )
-
-s = s.replace(
-    chat_found_old,
-    chat_found_new,
-    1
-)
-
-download_toggle_old = '\t\t\t\t\t\tif (index != -1) {\n\t\t\t\t\t\t\tDeleteFile(documents[i].filename);\n\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t} else if (file_size != documents[i].size) {'
-
-download_toggle_new = '\t\t\t\t\t\tif (index != -1) {\n\t\t\t\t\t\t\tif (\n\t\t\t\t\t\t\t\t!(\n\t\t\t\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t\t\t\t)\n\t\t\t\t\t\t\t) {\n\t\t\t\t\t\t\t\tDeleteFile(documents[i].filename);\n\t\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else if (file_size != documents[i].size) {'
-
-if download_toggle_old not in s:
-    raise SystemExit(
-        "Could not locate in-progress chat download toggle block."
-    )
-
-s = s.replace(
-    download_toggle_old,
-    download_toggle_new,
-    1
-)
-
-missing_toggle_old = '\t\t\t\t\t} else {\n\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t}'
-
-missing_toggle_new = '\t\t\t\t\t} else {\n\t\t\t\t\t\tif (\n\t\t\t\t\t\t\t!(\n\t\t\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t\t\t)\n\t\t\t\t\t\t) {\n\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t}\n\t\t\t\t\t}'
-
-if missing_toggle_old not in s:
-    raise SystemExit(
-        "Could not locate missing-file in-progress download toggle block."
-    )
-
-s = s.replace(
-    missing_toggle_old,
-    missing_toggle_new,
-    1
-)
+s = replace_function(s, "void message_search_clear_chat_view()", clear_v2)
+
+# Make the already-existing refresh less destructive visually.
+refresh_start, refresh_end = function_range(s, "static void media_archive_refresh() {")
+refresh_func = s[refresh_start:refresh_end]
+refresh_func = refresh_func.replace("RDW_ERASE |\n", "")
+refresh_func = refresh_func.replace("RDW_ERASE |\r\n", "")
+s = s[:refresh_start] + refresh_func + s[refresh_end:]
 
 write(t, s)
 
 
-# =============================================================================
-# src/response.cpp - safe Document parser + route download completion
-# =============================================================================
+# -----------------------------------------------------------------------------
+# response.cpp: preserve Media on jump + request video document thumbnails
+# -----------------------------------------------------------------------------
 
 s = read(r)
 
-if "media_tabs_av_document_parser_v1" not in s:
-    anchor = "static void media_archive_handle_server_response("
-    pos = s.find(anchor)
-
-    if pos < 0:
-        raise SystemExit(
-            "Could not locate direct Media server response handler."
-        )
-
-    doc_parser = r'''
-// ======================================================================================
-// Safe A/V Document parser (no message_handler / RichEdit rendering)
-// ======================================================================================
-
-// media_tabs_av_document_parser_v1
-
-static void media_tabs_free_document(
-    Document* document
-) {
-    if (!document)
-        return;
-
-    free(document->filename);
-    free(document->file_reference);
-
-    document->filename = NULL;
-    document->file_reference = NULL;
-}
-
-static bool media_tabs_extract_document(
-    BYTE* media,
-    int media_length,
-    int message_id,
-    int kind,
-    Document* document,
-    wchar_t* display_name,
-    int display_count,
-    int* duration_out
-) {
-    if (
-        !media ||
-        !document ||
-        !display_name ||
-        display_count < 8 ||
-        !duration_out ||
-        message_id <= 0 ||
-        media_length < 48
-    ) {
-        return false;
-    }
-
-    memset(
-        document,
-        0,
-        sizeof(Document)
-    );
-
-    display_name[0] = 0;
-    *duration_out = 0;
-
-    if (
-        read_le(media, 4) !=
-        0xdd570bd5
-    ) {
-        return false;
-    }
-
-    int media_flags =
-        read_le(
-            media + 4,
-            4
-        );
-
-    if (!(media_flags & (1 << 0)))
-        return false;
-
-    if (
-        read_le(media + 8, 4) !=
-        0x8fd4c4d8
-    ) {
-        return false;
-    }
-
-    int doc_flags =
-        read_le(
-            media + 12,
-            4
-        );
-
-    memcpy(
-        document->id,
-        media + 16,
-        8
-    );
-
-    memcpy(
-        document->access_hash,
-        media + 24,
-        8
-    );
-
-    int file_ref_len =
-        tlstr_len(
-            media + 32,
-            true
-        );
-
-    if (
-        file_ref_len <= 0 ||
-        file_ref_len >
-            media_length - 32
-    ) {
-        return false;
-    }
-
-    document->file_reference =
-        (BYTE*)malloc(
-            file_ref_len
-        );
-
-    if (!document->file_reference)
-        return false;
-
-    memcpy(
-        document->file_reference,
-        media + 32,
-        file_ref_len
-    );
-
-    int offset =
-        32 +
-        file_ref_len;
-
-    if (offset + 4 > media_length) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    offset += 4; // date
-
-    if (offset >= media_length) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    int mime_len =
-        tlstr_len(
-            media + offset,
-            true
-        );
-
-    if (
-        mime_len <= 0 ||
-        mime_len >
-            media_length - offset
-    ) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    offset += mime_len;
-
-    if (offset + 8 > media_length) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    document->size =
-        read_le(
-            media + offset,
-            8
-        );
-
-    offset += 8;
-
-    if (
-        doc_flags & (1 << 0) ||
-        doc_flags & (1 << 1)
-    ) {
-        int n =
-            photo_video_size_offset(
-                media + offset,
-                (doc_flags & (1 << 0))
-                    ? true
-                    : false,
-                true,
-                (doc_flags & (1 << 1))
-                    ? true
-                    : false
-            );
-
-        if (
-            n <= 0 ||
-            n >
-                media_length - offset
-        ) {
-            media_tabs_free_document(document);
-            return false;
-        }
-
-        offset += n;
-    }
-
-    if (offset + 12 > media_length) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    document->dc =
-        read_le(
-            media + offset,
-            4
-        );
-
-    offset += 4;
-
-    if (
-        read_le(
-            media + offset,
-            4
-        ) != 0x1cb5c415
-    ) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    int attribute_count =
-        read_le(
-            media + offset + 4,
-            4
-        );
-
-    if (
-        attribute_count < 0 ||
-        attribute_count > 256
-    ) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    offset += 8;
-
-    wchar_t title[160] = {0};
-    wchar_t performer[160] = {0};
-    wchar_t filename[260] = {0};
-
-    bool saw_video = false;
-    bool saw_audio = false;
-
-    for (
-        int i = 0;
-        i < attribute_count;
-        i++
-    ) {
-        if (offset + 4 > media_length) {
-            media_tabs_free_document(document);
-            return false;
-        }
-
-        int attr_cons =
-            read_le(
-                media + offset,
-                4
-            );
-
-        if (attr_cons == 0x15590068) {
-            read_string(
-                media + offset + 4,
-                filename
-            );
-        }
-
-        if (attr_cons == 0x9852f9c6) {
-            saw_audio = true;
-
-            int flags =
-                read_le(
-                    media + offset + 4,
-                    4
-                );
-
-            *duration_out =
-                read_le(
-                    media + offset + 8,
-                    4
-                );
-
-            int p =
-                offset + 12;
-
-            if (flags & (1 << 0)) {
-                read_string(
-                    media + p,
-                    title
-                );
-
-                p +=
-                    tlstr_len(
-                        media + p,
-                        true
-                    );
-            }
-
-            if (flags & (1 << 1)) {
-                read_string(
-                    media + p,
-                    performer
-                );
-            }
-        }
-
-        if (attr_cons == 0x43c57c48) {
-            saw_video = true;
-
-            double duration_double = 0.0;
-
-            memcpy(
-                &duration_double,
-                media + offset + 8,
-                8
-            );
-
-            if (
-                duration_double > 0.0 &&
-                duration_double < 2147483647.0
-            ) {
-                *duration_out =
-                    (int)duration_double;
-            }
-        }
-
-        int n =
-            docatt_offset(
-                media + offset
-            );
-
-        if (
-            n <= 0 ||
-            n >
-                media_length - offset
-        ) {
-            media_tabs_free_document(document);
-            return false;
-        }
-
-        offset += n;
-    }
-
-    if (
-        kind == 1 &&
-        !saw_video
-    ) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    if (
-        kind == 2 &&
-        !saw_audio
-    ) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    if (filename[0]) {
-        document->filename =
-            _wcsdup(
-                filename
-            );
-    } else {
-        wchar_t fallback[80];
-
-        _snwprintf(
-            fallback,
-            ARRAYSIZE(fallback) - 1,
-            kind == 1
-                ? L"video_%08X.mp4"
-                : L"audio_%08X.mp3",
-            (unsigned int)read_le(
-                document->access_hash + 4,
-                4
-            )
-        );
-
-        fallback[
-            ARRAYSIZE(fallback) - 1
-        ] = 0;
-
-        document->filename =
-            _wcsdup(
-                fallback
-            );
-    }
-
-    if (!document->filename) {
-        media_tabs_free_document(document);
-        return false;
-    }
-
-    document->photo_size = 0;
-    document->visible = false;
-    document->min = -message_id;
-    document->max = -message_id;
-
-    if (
-        kind == 2 &&
-        (title[0] || performer[0])
-    ) {
-        if (
-            performer[0] &&
-            title[0]
-        ) {
-            _snwprintf(
-                display_name,
-                display_count - 1,
-                L"%s - %s",
-                performer,
-                title
-            );
-        } else if (title[0]) {
-            wcsncpy(
-                display_name,
-                title,
-                display_count - 1
-            );
-        } else {
-            wcsncpy(
-                display_name,
-                performer,
-                display_count - 1
-            );
-        }
-    } else {
-        wcsncpy(
-            display_name,
-            document->filename,
-            display_count - 1
-        );
-    }
-
-    display_name[
-        display_count - 1
-    ] = 0;
-
-    return true;
-}
-
-'''
-
-    s = s[:pos] + doc_parser + s[pos:]
-
-handler = r'''static void media_archive_handle_server_response(
-    unsigned int constructor,
-    BYTE* response,
-    int length
-) {
-    if (!media_archive_accept_response())
-        return;
-
-    int offset = 0;
-    int total = 0;
-
-    if (!message_search_get_vector(
-        constructor,
-        response,
-        length,
-        &offset,
-        &total
-    )) {
-        diag_log(
-            "media tabs response vector failed ctor=0x%08X length=%d kind=%d",
-            constructor,
-            length,
-            media_archive_kind
-        );
-
-        media_archive_finish_server_page(
-            0,
-            0,
-            0
-        );
-
-        return;
-    }
-
-    int vector_header =
-        offset - 8;
-
-    if (
-        vector_header < 0 ||
-        vector_header + 8 >
-            length
-    ) {
-        media_archive_finish_server_page(
-            0,
-            0,
-            total
-        );
-
-        return;
-    }
-
-    int count =
-        read_le(
-            response +
-            vector_header +
-            4,
-            4
-        );
-
-    if (
-        count < 0 ||
-        count > 1000
-    ) {
-        media_archive_finish_server_page(
-            0,
-            0,
-            total
-        );
-
-        return;
-    }
-
-    int last_id = 0;
-    int parsed_count = 0;
-    int added_count = 0;
-
-    for (
-        int i = 0;
-        i < count;
-        i++
-    ) {
-        if (
-            offset < 0 ||
-            offset >= length
-        ) {
-            break;
-        }
-
-        int consumed = 0;
-        int message_id = 0;
-        BYTE* media = NULL;
-        int media_length = 0;
-
-        if (!media_archive_message_envelope(
-            response + offset,
-            length - offset,
-            &consumed,
-            &message_id,
-            &media,
-            &media_length
-        )) {
-            diag_log(
-                "media tabs envelope failed kind=%d item=%d offset=%d ctor=0x%08X",
-                media_archive_kind,
-                i,
-                offset,
-                (unsigned int)read_le(
-                    response + offset,
-                    4
-                )
-            );
-
-            break;
-        }
-
-        if (
-            consumed <= 0 ||
-            consumed >
-                length -
-                offset
-        ) {
-            break;
-        }
-
-        if (message_id > 0)
-            last_id = message_id;
-
-        if (
-            media &&
-            media_archive_kind == 0
-        ) {
-            Document document;
-
-            if (
-                media_archive_extract_photo_document(
-                    media,
-                    media_length,
-                    message_id,
-                    &document
-                )
-            ) {
-                if (!media_archive_saved_has_document(
-                    documents,
-                    document.id
-                )) {
-                    documents.push_front(
-                        document
-                    );
-
-                    added_count++;
-                } else {
-                    media_archive_free_document_fields(
-                        &document
-                    );
-                }
-            }
-        }
-
-        if (
-            media &&
-            media_archive_kind != 0
-        ) {
-            Document document;
-            wchar_t display_name[260] = {0};
-            int duration = 0;
-
-            if (
-                media_tabs_extract_document(
-                    media,
-                    media_length,
-                    message_id,
-                    media_archive_kind,
-                    &document,
-                    display_name,
-                    ARRAYSIZE(display_name),
-                    &duration
-                )
-            ) {
-                media_archive_add_av_document(
-                    &document,
-                    message_id,
-                    media_archive_kind,
-                    display_name,
-                    duration
-                );
-
-                media_tabs_free_document(
-                    &document
-                );
-
-                added_count++;
-            } else {
-                diag_log(
-                    "media tabs document skipped kind=%d item=%d id=%d media_ctor=0x%08X",
-                    media_archive_kind,
-                    i,
-                    message_id,
-                    (unsigned int)read_le(
-                        media,
-                        4
-                    )
-                );
-            }
-        }
-
-        parsed_count++;
-        offset += consumed;
-    }
-
-    diag_log(
-        "media tabs page complete kind=%d raw=%d parsed=%d added=%d total=%d last_id=%d",
-        media_archive_kind,
-        count,
-        parsed_count,
-        added_count,
-        total,
-        last_id
-    );
-
-    media_archive_finish_server_page(
-        last_id,
-        parsed_count,
-        total
-    );
-
-    if (
-        media_archive_kind == 0 &&
-        added_count > 0
-    ) {
-        media_archive_start_next_download();
-    } else {
-        media_archive_finish_av_page();
-    }
-}'''
-
-s = replace_function(
-    s,
-    "static void media_archive_handle_server_response(",
-    handler
+jump_start, jump_end = function_range(s, "static void media_archive_handle_jump_response(")
+jump_func = s[jump_start:jump_end]
+
+old = "    message_search_clear_chat_view();"
+if old not in jump_func:
+    raise SystemExit("Could not locate chat clear inside Media jump response")
+
+jump_func = jump_func.replace(
+    old,
+    "    media_archive_preserve_on_chat_clear = true;\n"
+    "    message_search_clear_chat_view();\n"
+    "    media_archive_preserve_on_chat_clear = false;",
+    1,
 )
+s = s[:jump_start] + jump_func + s[jump_end:]
 
-if "media_archive_av_download_complete(downloading_docs[i].filename);" not in s:
-    # Locate the completion branch in upload.file by using two stable nearby strings.
-    upload_pos = s.find("case 0x96a18d5: { // upload.file")
-    if upload_pos < 0:
-        raise SystemExit("Could not locate upload.file handler.")
+# Document flags bit 0 means thumbs are present in the Document constructor.
+parser_start, parser_end = function_range(s, "static bool media_tabs_extract_document(")
+parser = s[parser_start:parser_end]
 
-    complete_pos = s.find(
-        "if (size < 1048576)",
-        upload_pos
-    )
-    if complete_pos < 0:
-        raise SystemExit(
-            "Could not locate upload.file completion condition."
-        )
-
-    decl_pos = s.find(
-        "wchar_t status_str[100];",
-        complete_pos
-    )
-    if decl_pos < 0 or decl_pos - complete_pos > 1000:
-        raise SystemExit(
-            "Could not locate upload.file completion status declaration."
-        )
-
-    line_start = s.rfind("\n", 0, decl_pos) + 1
-    indent = s[line_start:decl_pos]
-
-    insert = (
-        indent
-        + "media_archive_av_download_complete("
-        + "downloading_docs[i].filename"
-        + ");\n"
-        + indent
-        + "media_player_chat_download_complete("
-        + "downloading_docs[i].filename"
-        + ");\n"
+old = "    document->photo_size = 0;"
+if old in parser:
+    parser = parser.replace(
+        old,
+        "    document->photo_size =\n"
+        "        (kind == 1 && (doc_flags & (1 << 0))) ? 2 : 0;",
+        1,
     )
 
-    s = s[:line_start] + insert + s[line_start:]
-
-
-if (
-    "media_archive_av_download_complete(downloading_docs[i].filename);" in s
-    and
-    "media_player_chat_download_complete(downloading_docs[i].filename);" not in s
-):
-    needle = "media_archive_av_download_complete(downloading_docs[i].filename);"
-    pos = s.find(needle)
-    line_start = s.rfind("\n", 0, pos) + 1
-    indent = s[line_start:pos]
-
-    s = s[:pos + len(needle)] + (
-        "\n"
-        + indent
-        + "media_player_chat_download_complete(downloading_docs[i].filename);"
-    ) + s[pos + len(needle):]
-
+s = s[:parser_start] + parser + s[parser_end:]
 write(r, s)
 
-checks = {
-    h: [
-        "media_tabs_av_v1",
-        "#include <dshow.h>",
-        "strmiids.lib",
-        "media_archive_add_av_document",
-        "media_archive_finish_av_page",
-    ],
-    t: [
-        "media_tabs_av_runtime_v1",
-        "WC_TABCONTROLW",
-        "media_archive_filter_constructor",
-        "TelegacyMediaPlayerWindow",
-        "CLSID_FilterGraph",
-        "media_archive_begin_av_download",
-        "void media_archive_finish_av_page()",
-    ],
-    r: [
-        "media_tabs_av_document_parser_v1",
-        "media_tabs_extract_document",
-        "media tabs page complete",
-        "media_archive_finish_av_page();",
-        "media_archive_av_download_complete(downloading_docs[i].filename);",
-        "media_player_chat_download_complete(downloading_docs[i].filename);",
-    ],
-}
 
-for p, tokens in checks.items():
-    text = read(p)
-    for token in tokens:
-        if token not in text:
-            raise SystemExit(
-                f"Internal verification failed in {p.name}: {token}"
-            )
+# -----------------------------------------------------------------------------
+# message.cpp: music gets a compact inline Win98-ish play row
+# -----------------------------------------------------------------------------
+
+s = read(m)
+
+if "media_inline_music_row_v2" not in s:
+    old = "\t\tbool voice = false, gif = false, round = false, sticker = false;"
+    if old not in s:
+        raise SystemExit("Could not locate document media flags in message.cpp")
+
+    s = s.replace(
+        old,
+        "\t\tbool voice = false, gif = false, round = false, sticker = false, music = false; // media_inline_music_row_v2",
+        1,
+    )
+
+    old = "\t\t\t\t\t\tvoice = (att_flags & (1 << 10)) ? true : false;"
+    if old not in s:
+        raise SystemExit("Could not locate DocumentAttributeAudio voice flag")
+
+    s = s.replace(old, old + "\n\t\t\t\t\t\tmusic = !voice;", 1)
+
+    old = (
+        "\t\t\tdocument.min = cr_startmsg.cpMin + written;\n"
+        "\t\t\twritten += riched_write(chat, document.filename);\n"
+        "\t\t\tdocument.max = cr_startmsg.cpMin + written;\n"
+        "\t\t\tif (duration_str[0] == ' ') written += riched_write(chat, &duration_str[0]);\n"
+        "\t\t\twritten += riched_write(chat, &size_str[0]);"
+    )
+
+    new = (
+        "\t\t\tdocument.min = cr_startmsg.cpMin + written;\n"
+        "\t\t\tif (music) written += riched_write(chat, L\"[>] \" );\n"
+        "\t\t\twritten += riched_write(chat, document.filename);\n"
+        "\t\t\tif (duration_str[0] == ' ') written += riched_write(chat, &duration_str[0]);\n"
+        "\t\t\twritten += riched_write(chat, &size_str[0]);\n"
+        "\t\t\tdocument.max = cr_startmsg.cpMin + written;"
+    )
+
+    if old not in s:
+        raise SystemExit("Could not locate document row rendering block")
+
+    s = s.replace(old, new, 1)
+
+write(m, s)
+
+
+# -----------------------------------------------------------------------------
+# Chat click behavior: one click on music; double click on video.
+# This is deliberately a small textual rewrite so the v1 download machinery stays.
+# -----------------------------------------------------------------------------
+
+s = read(t)
+
+queue_old = '''\t\t\t\t\tif (\n\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n'''
+
+if queue_old in s:
+    queue_new = '''\t\t\t\t\tint media_kind = media_player_kind_from_path(documents[i].filename);\n\t\t\t\t\tbool media_play_request =\n\t\t\t\t\t\t(media_kind == 2 && !media_double_click) ||\n\t\t\t\t\t\t(media_kind == 1 && media_double_click);\n\n\t\t\t\t\tif (media_play_request) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n'''
+    s = s.replace(queue_old, queue_new, 1)
+
+    # Existing v1 has two guards that prevent an in-progress double-click from
+    # cancelling its own download. Extend those guards to music single-click.
+    s = s.replace(
+        "media_double_click &&\n\t\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0",
+        "media_play_request",
+        1,
+    )
+    s = s.replace(
+        "media_double_click &&\n\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0",
+        "media_play_request",
+        1,
+    )
+
+    open_old = '''\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif (!media_player_try_open_chat_path(documents[i].filename)) {\n\t\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n'''
+
+    open_new = '''\t\t\t\t\t\t} else if (media_play_request) {\n\t\t\t\t\t\t\tmedia_player_try_open_chat_path(documents[i].filename);\n\t\t\t\t\t\t} else if (media_double_click && media_kind == 0) {\n\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n'''
+
+    if open_old in s:
+        s = s.replace(open_old, open_new, 1)
+
+write(t, s)
+
+
+# -----------------------------------------------------------------------------
+# Final diagnostics / marker
+# -----------------------------------------------------------------------------
+
+s = read(t)
+if "media_tabs_av_runtime_v2" not in s:
+    raise SystemExit("Media v2 marker missing after patch")
+
+for token in (
+    "MFPCreateMediaPlayer",
+    "media_inline_audio_toggle",
+    "media_archive_preserve_on_chat_clear",
+    "BS_OWNERDRAW",
+):
+    if token not in s:
+        raise SystemExit(f"Media v2 verification failed: {token}")
 
 print(
-    "Applied 3-tab Media browser (Images / Video / Music), "
-    "safe server-side A/V metadata parsing, Telegram document download, "
-    "and classic DirectShow player."
+    "Applied Media A/V v2: MFPlay-first video, DirectShow fallback, "
+    "inline chat music, classic transport buttons, Media state preservation, "
+    "and reduced redraw/flicker."
 )
