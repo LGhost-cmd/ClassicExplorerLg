@@ -162,6 +162,10 @@ void media_archive_av_download_complete(
 );
 
 void media_archive_finish_av_page();
+
+void media_player_chat_download_complete(
+    const wchar_t* path
+);
 '''
 
     s = s.replace(decl_anchor, decl_anchor + decls, 1)
@@ -1249,6 +1253,130 @@ static bool media_player_open(
     media_player_update_controls();
 
     return true;
+}
+
+
+static wchar_t media_chat_autoplay_path[MAX_PATH] = {0};
+static int media_chat_autoplay_kind = 0;
+
+static int media_player_kind_from_path(
+    const wchar_t* path
+) {
+    if (!path || !path[0])
+        return 0;
+
+    const wchar_t* dot =
+        wcsrchr(path, L'.');
+
+    if (!dot)
+        return 0;
+
+    if (
+        _wcsicmp(dot, L".mp4") == 0 ||
+        _wcsicmp(dot, L".m4v") == 0 ||
+        _wcsicmp(dot, L".mov") == 0 ||
+        _wcsicmp(dot, L".avi") == 0 ||
+        _wcsicmp(dot, L".mkv") == 0 ||
+        _wcsicmp(dot, L".webm") == 0 ||
+        _wcsicmp(dot, L".wmv") == 0
+    ) {
+        return 1;
+    }
+
+    if (
+        _wcsicmp(dot, L".mp3") == 0 ||
+        _wcsicmp(dot, L".m4a") == 0 ||
+        _wcsicmp(dot, L".aac") == 0 ||
+        _wcsicmp(dot, L".wav") == 0 ||
+        _wcsicmp(dot, L".wma") == 0 ||
+        _wcsicmp(dot, L".ogg") == 0 ||
+        _wcsicmp(dot, L".opus") == 0 ||
+        _wcsicmp(dot, L".flac") == 0
+    ) {
+        return 2;
+    }
+
+    return 0;
+}
+
+static void media_player_queue_chat_autoplay(
+    const wchar_t* path
+) {
+    int kind =
+        media_player_kind_from_path(path);
+
+    if (!kind)
+        return;
+
+    wcsncpy(
+        media_chat_autoplay_path,
+        path,
+        ARRAYSIZE(media_chat_autoplay_path) - 1
+    );
+
+    media_chat_autoplay_path[
+        ARRAYSIZE(media_chat_autoplay_path) - 1
+    ] = 0;
+
+    media_chat_autoplay_kind = kind;
+
+    diag_log(
+        "media player chat autoplay queued kind=%d path=%ls",
+        kind,
+        path
+    );
+}
+
+static bool media_player_try_open_chat_path(
+    const wchar_t* path
+) {
+    int kind =
+        media_player_kind_from_path(path);
+
+    if (!kind)
+        return false;
+
+    media_chat_autoplay_path[0] = 0;
+    media_chat_autoplay_kind = 0;
+
+    return media_player_open(
+        path,
+        kind == 1
+    );
+}
+
+void media_player_chat_download_complete(
+    const wchar_t* path
+) {
+    if (
+        !path ||
+        !path[0] ||
+        !media_chat_autoplay_path[0] ||
+        media_chat_autoplay_kind == 0 ||
+        _wcsicmp(
+            path,
+            media_chat_autoplay_path
+        ) != 0
+    ) {
+        return;
+    }
+
+    int kind =
+        media_chat_autoplay_kind;
+
+    media_chat_autoplay_path[0] = 0;
+    media_chat_autoplay_kind = 0;
+
+    diag_log(
+        "media player chat download complete kind=%d path=%ls",
+        kind,
+        path
+    );
+
+    media_player_open(
+        path,
+        kind == 1
+    );
 }
 
 static const wchar_t* media_archive_safe_extension(
@@ -2897,6 +3025,70 @@ if error_focus_block in error_func:
 s = s[:error_start] + error_func + s[error_end:]
 
 
+# Also route normal chat audio/video attachments through the built-in player.
+# Previously the Media tab used media_player_open(), but the RichEdit chat
+# double-click path still called ShellExecute().
+
+chat_open_old = '\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}'
+
+chat_open_new = '\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif (!media_player_try_open_chat_path(documents[i].filename)) {\n\t\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}'
+
+if chat_open_old not in s:
+    raise SystemExit(
+        "Could not locate normal chat document ShellExecute double-click block."
+    )
+
+s = s.replace(
+    chat_open_old,
+    chat_open_new,
+    1
+)
+
+chat_found_old = '\t\t\t\tif (documents[i].min <= sel_char && documents[i].max >= sel_char) {\n\t\t\t\t\tfound = true;\n\t\t\t\t\tFILE* f = _wfopen(documents[i].filename, L"rb");'
+
+chat_found_new = '\t\t\t\tif (documents[i].min <= sel_char && documents[i].max >= sel_char) {\n\t\t\t\t\tfound = true;\n\n\t\t\t\t\tif (\n\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n\n\t\t\t\t\tFILE* f = _wfopen(documents[i].filename, L"rb");'
+
+if chat_found_old not in s:
+    raise SystemExit(
+        "Could not locate chat document match block."
+    )
+
+s = s.replace(
+    chat_found_old,
+    chat_found_new,
+    1
+)
+
+download_toggle_old = '\t\t\t\t\t\tif (index != -1) {\n\t\t\t\t\t\t\tDeleteFile(documents[i].filename);\n\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t} else if (file_size != documents[i].size) {'
+
+download_toggle_new = '\t\t\t\t\t\tif (index != -1) {\n\t\t\t\t\t\t\tif (\n\t\t\t\t\t\t\t\t!(\n\t\t\t\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t\t\t\t)\n\t\t\t\t\t\t\t) {\n\t\t\t\t\t\t\t\tDeleteFile(documents[i].filename);\n\t\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t} else if (file_size != documents[i].size) {'
+
+if download_toggle_old not in s:
+    raise SystemExit(
+        "Could not locate in-progress chat download toggle block."
+    )
+
+s = s.replace(
+    download_toggle_old,
+    download_toggle_new,
+    1
+)
+
+missing_toggle_old = '\t\t\t\t\t} else {\n\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t}'
+
+missing_toggle_new = '\t\t\t\t\t} else {\n\t\t\t\t\t\tif (\n\t\t\t\t\t\t\t!(\n\t\t\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t\t\t)\n\t\t\t\t\t\t) {\n\t\t\t\t\t\t\tSendMessage(hStatus, SB_SETTEXTA, 1, (LPARAM)"");\n\t\t\t\t\t\t\tfree(downloading_docs[index].filename);\n\t\t\t\t\t\t\tfree(downloading_docs[index].file_reference);\n\t\t\t\t\t\t\tdownloading_docs.erase(downloading_docs.begin() + index);\n\t\t\t\t\t\t}\n\t\t\t\t\t}'
+
+if missing_toggle_old not in s:
+    raise SystemExit(
+        "Could not locate missing-file in-progress download toggle block."
+    )
+
+s = s.replace(
+    missing_toggle_old,
+    missing_toggle_new,
+    1
+)
+
 write(t, s)
 
 
@@ -3630,9 +3822,30 @@ if "media_archive_av_download_complete(downloading_docs[i].filename);" not in s:
         + "media_archive_av_download_complete("
         + "downloading_docs[i].filename"
         + ");\n"
+        + indent
+        + "media_player_chat_download_complete("
+        + "downloading_docs[i].filename"
+        + ");\n"
     )
 
     s = s[:line_start] + insert + s[line_start:]
+
+
+if (
+    "media_archive_av_download_complete(downloading_docs[i].filename);" in s
+    and
+    "media_player_chat_download_complete(downloading_docs[i].filename);" not in s
+):
+    needle = "media_archive_av_download_complete(downloading_docs[i].filename);"
+    pos = s.find(needle)
+    line_start = s.rfind("\n", 0, pos) + 1
+    indent = s[line_start:pos]
+
+    s = s[:pos + len(needle)] + (
+        "\n"
+        + indent
+        + "media_player_chat_download_complete(downloading_docs[i].filename);"
+    ) + s[pos + len(needle):]
 
 write(r, s)
 
@@ -3659,6 +3872,7 @@ checks = {
         "media tabs page complete",
         "media_archive_finish_av_page();",
         "media_archive_av_download_complete(downloading_docs[i].filename);",
+        "media_player_chat_download_complete(downloading_docs[i].filename);",
     ],
 }
 
