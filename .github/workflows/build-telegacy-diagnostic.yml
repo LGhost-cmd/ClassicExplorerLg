@@ -61,6 +61,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_search_context.py" "telegacy-src"
 
+      - name: Polish search UI and add server Media
+        shell: pwsh
+        run: |
+            python "telegacy-diagnostic\patch_ui_media_server.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
