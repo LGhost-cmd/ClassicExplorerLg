@@ -160,6 +160,8 @@ void media_archive_add_av_document(
 void media_archive_av_download_complete(
     const wchar_t* path
 );
+
+void media_archive_finish_av_page();
 '''
 
     s = s.replace(decl_anchor, decl_anchor + decls, 1)
@@ -1390,6 +1392,10 @@ static bool media_archive_begin_av_download(
     copy.photo_size = 0;
     copy.visible = false;
 
+    if (!item->av_document.file_reference) {
+        return false;
+    }
+
     int file_ref_len =
         tlstr_len(
             item->av_document.file_reference,
@@ -1649,6 +1655,11 @@ void media_archive_add_av_document(
     media_archive_items.push_back(
         item
     );
+}
+
+void media_archive_finish_av_page() {
+    media_archive_page_loading = false;
+    media_archive_refresh();
 }
 
 static void media_archive_reset_for_kind(
@@ -1933,7 +1944,7 @@ refresh = r'''static void media_archive_refresh() {
 
 s = replace_function(
     s,
-    "static void media_archive_refresh()",
+    "static void media_archive_refresh() {",
     refresh
 )
 
@@ -3317,8 +3328,7 @@ handler = r'''static void media_archive_handle_server_response(
     ) {
         media_archive_start_next_download();
     } else {
-        media_archive_page_loading = false;
-        media_archive_refresh();
+        media_archive_finish_av_page();
     }
 }'''
 
@@ -3372,6 +3382,7 @@ checks = {
         "#include <dshow.h>",
         "strmiids.lib",
         "media_archive_add_av_document",
+        "media_archive_finish_av_page",
     ],
     t: [
         "media_tabs_av_runtime_v1",
@@ -3380,11 +3391,13 @@ checks = {
         "TelegacyMediaPlayerWindow",
         "CLSID_FilterGraph",
         "media_archive_begin_av_download",
+        "void media_archive_finish_av_page()",
     ],
     r: [
         "media_tabs_av_document_parser_v1",
         "media_tabs_extract_document",
         "media tabs page complete",
+        "media_archive_finish_av_page();",
         "media_archive_av_download_complete(downloading_docs[i].filename);",
     ],
 }
