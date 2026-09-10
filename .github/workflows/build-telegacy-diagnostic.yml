@@ -76,6 +76,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_page_jump.py" "telegacy-src"
 
+      - name: Stabilize Media and add go-to-message
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_stability_jump.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
