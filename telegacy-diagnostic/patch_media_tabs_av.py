@@ -2488,11 +2488,16 @@ window_proc = r'''static LRESULT CALLBACK TelegacyMediaArchiveWindow(
                     (LONG_PTR)TelegacyMediaPageEditProc
                 );
 
-            ListView_SetExtendedListViewStyle(
+            // ListView double-buffer flag is 0x00010000.  Older commctrl.h
+            // headers used by this x86 build do not always declare the name,
+            // even though the control on modern Windows supports the flag.
+            SendMessageW(
                 hMediaArchiveList,
+                LVM_SETEXTENDEDLISTVIEWSTYLE,
+                0,
                 LVS_EX_BORDERSELECT |
                 LVS_EX_FULLROWSELECT |
-                LVS_EX_DOUBLEBUFFER
+                0x00010000
             );
 
             media_archive_refresh();
