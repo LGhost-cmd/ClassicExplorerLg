@@ -1308,7 +1308,7 @@ print(
 
 
 # =============================================================================
-# Media A/V v3
+# Media A/V v3.1 (compile-order fixes)
 # - truly atomic Media page swaps (no empty-page flash / per-thumb repaint)
 # - full-size photo download on double click (not the cached preview)
 # - Telegram document thumbnails for video in Media and in the chat
@@ -1334,6 +1334,7 @@ if "media_tabs_av_v3" not in s:
     s = s.replace(
         anchor,
         anchor
+        + "\nstruct DCInfo;"
         + "\nvoid media_archive_request_video_thumbnail(Document* document, DCInfo* dcInfo);"
         + "\nbool media_archive_handle_full_photo_upload(const BYTE* rpc_id, BYTE* response, int length);"
         + "\n// media_tabs_av_v3",
@@ -1437,6 +1438,7 @@ static int media_inline_audio_last_second = -1;
         forward_anchor,
         forward_anchor
         + "\n\nstatic bool media_archive_server_queue_empty();"
+        + "\nstatic void media_archive_update_nav();"
         + "\nstatic void media_archive_commit_ready_page();",
         1,
     )
@@ -2099,7 +2101,12 @@ static void media_inline_audio_apply_visual(
             );
         }
 
-        CHARFORMAT2 cf = {0};
+        CHARFORMAT2 cf;
+        memset(
+            &cf,
+            0,
+            sizeof(cf)
+        );
         cf.cbSize = sizeof(cf);
         cf.dwMask =
             CFM_LINK |
@@ -2187,6 +2194,24 @@ static void media_inline_audio_start_timer() {
 '''
 
     s = s[:insert_at] + helpers_v3 + s[insert_at:]
+
+    # The v2 audio functions are textually before the v3 visual/timer helper
+    # definitions. Add forward declarations before replacing those functions.
+    audio_release_pos = s.find("static void media_inline_audio_release()")
+    if audio_release_pos < 0:
+        raise SystemExit("Could not locate media_inline_audio_release() for v3 forward declarations.")
+
+    audio_forward_decls = (
+        "static void media_inline_audio_apply_visual(bool force);\n"
+        "static void media_inline_audio_start_timer();\n\n"
+    )
+
+    if "static void media_inline_audio_apply_visual(bool force);" not in s[:audio_release_pos]:
+        s = (
+            s[:audio_release_pos]
+            + audio_forward_decls
+            + s[audio_release_pos:]
+        )
 
     # Replace v2 audio release/toggle so the visual state is updated as well.
     release_audio_v3 = r'''static void media_inline_audio_release() {
