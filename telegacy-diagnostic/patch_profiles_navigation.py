@@ -1665,3 +1665,343 @@ print(
     "participant profiles, bounded avatar gallery, stable chat scrolling, "
     "and larger dialog batches."
 )
+
+
+# =============================================================================
+# LatvianGhost profile navigation v3
+# Larger 220x220 avatar gallery, square frame, and per-preview pixel/byte info.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# telegacy.h — metadata label shared by procs/helpers/response.
+# ---------------------------------------------------------------------------
+s = read(h)
+
+if "profile_navigation_latvianghost_v3" not in s:
+    marker = "// profile_navigation_latvianghost_v2"
+    if marker not in s:
+        raise SystemExit("Profile navigation v2 marker is missing before v3.")
+
+    decl_anchor = "HBITMAP profile_gallery_fit_bitmap(HBITMAP source);"
+    if decl_anchor not in s:
+        raise SystemExit("Could not locate profile gallery bitmap declaration.")
+
+    s = s.replace(
+        decl_anchor,
+        decl_anchor
+        + "\nextern HWND profile_gallery_metadata;"
+        + "\nvoid profile_gallery_update_metadata(HBITMAP source, __int64 encoded_size);"
+        + "\n// profile_navigation_latvianghost_v3",
+        1,
+    )
+
+write(h, s)
+
+# ---------------------------------------------------------------------------
+# helpers.cpp — 220x220 fitting and metadata text.
+# ---------------------------------------------------------------------------
+s = read(helpers)
+
+if "profile_gallery_metadata = NULL" not in s:
+    global_anchor = "static bool profile_gallery_peer_had_current_photo = false;"
+    if global_anchor not in s:
+        raise SystemExit("Could not locate profile gallery globals for v3.")
+
+    s = s.replace(
+        global_anchor,
+        global_anchor + "\nHWND profile_gallery_metadata = NULL;",
+        1,
+    )
+
+# Grow only the fitted profile bitmap, not every image path in the client.
+fit_start, fit_end = function_range(s, "HBITMAP profile_gallery_fit_bitmap(HBITMAP source)")
+fit_func = s[fit_start:fit_end]
+
+if "const int dst_w = 160;" not in fit_func or "const int dst_h = 160;" not in fit_func:
+    raise SystemExit("Could not locate 160x160 avatar fitter in v2 output.")
+
+fit_func = fit_func.replace("const int dst_w = 160;", "const int dst_w = 220;", 1)
+fit_func = fit_func.replace("const int dst_h = 160;", "const int dst_h = 220;", 1)
+s = s[:fit_start] + fit_func + s[fit_end:]
+
+# Metadata helper: decoded dimensions + actual downloaded JPEG byte count.
+meta_insert = s.find("HBITMAP profile_gallery_fit_bitmap(HBITMAP source)")
+if meta_insert < 0:
+    raise SystemExit("Could not locate metadata helper insertion point.")
+
+meta_code = r'''
+void profile_gallery_update_metadata(
+    HBITMAP source,
+    __int64 encoded_size
+) {
+    if (
+        !profile_gallery_metadata ||
+        !IsWindow(profile_gallery_metadata)
+    ) {
+        return;
+    }
+
+    if (!source) {
+        SetWindowTextW(
+            profile_gallery_metadata,
+            L""
+        );
+        return;
+    }
+
+    BITMAP bm = {0};
+    if (!GetObject(source, sizeof(bm), &bm)) {
+        SetWindowTextW(
+            profile_gallery_metadata,
+            L""
+        );
+        return;
+    }
+
+    int width = bm.bmWidth;
+    int height = bm.bmHeight < 0 ? -bm.bmHeight : bm.bmHeight;
+
+    wchar_t size_text[48] = {0};
+
+    if (encoded_size < 0)
+        encoded_size = 0;
+
+    if (encoded_size < 1024) {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%I64d B",
+            encoded_size
+        );
+    } else if (encoded_size < 1024LL * 1024LL) {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%.1f KB",
+            (double)encoded_size / 1024.0
+        );
+    } else {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%.2f MB",
+            (double)encoded_size / (1024.0 * 1024.0)
+        );
+    }
+
+    wchar_t text[128] = {0};
+    _snwprintf(
+        text,
+        ARRAYSIZE(text) - 1,
+        L"%d x %d px   |   %s",
+        width,
+        height,
+        size_text
+    );
+    text[ARRAYSIZE(text) - 1] = 0;
+
+    SetWindowTextW(
+        profile_gallery_metadata,
+        text
+    );
+}
+
+'''
+
+if "void profile_gallery_update_metadata(" not in s:
+    s = s[:meta_insert] + meta_code + s[meta_insert:]
+
+# Historical avatar upload: report dimensions/weight before fitting and keep
+# the bitmap control locked to the new square.
+upload_start, upload_end = function_range(s, "bool profile_gallery_handle_upload(")
+upload_func = s[upload_start:upload_end]
+
+old_decoded = "    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);\n    if (decoded) {"
+new_decoded = (
+    "    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);\n"
+    "    if (decoded) {\n"
+    "        profile_gallery_update_metadata(decoded, bytes_len);"
+)
+if old_decoded not in upload_func:
+    raise SystemExit("Could not locate historical avatar decode block for v3.")
+upload_func = upload_func.replace(old_decoded, new_decoded, 1)
+upload_func = upload_func.replace(
+    "            10, 10, 160, 160,",
+    "            10, 10, 220, 220,",
+    1,
+)
+s = s[:upload_start] + upload_func + s[upload_end:]
+
+# Clear stale metadata when the profile/gallery closes.
+clear_start, clear_end = function_range(s, "void profile_gallery_clear()")
+clear_func = s[clear_start:clear_end]
+if "profile_gallery_metadata = NULL;" not in clear_func:
+    brace = clear_func.find("{")
+    clear_func = (
+        clear_func[:brace + 1]
+        + "\n    profile_gallery_metadata = NULL;"
+        + clear_func[brace + 1:]
+    )
+s = s[:clear_start] + clear_func + s[clear_end:]
+
+write(helpers, s)
+
+# ---------------------------------------------------------------------------
+# procs.cpp — larger square preview and clean metadata/navigation row.
+# ---------------------------------------------------------------------------
+s = read(p)
+
+# The v1 block already creates arrows for users. Re-layout only that user
+# branch so group/channel profile geometry is unchanged.
+user_block_anchor = r'''        if (peer->type == 0) {
+            profile_photo_previous = CreateWindowW('''
+if user_block_anchor not in s:
+    raise SystemExit("Could not locate user avatar navigation block for v3.")
+
+user_block_prefix = r'''        if (peer->type == 0) {
+            // v3: make the avatar a larger square without allowing it to
+            // overlap the profile fields on the right.
+            SetWindowPos(dlgPic, NULL, 10, 10, 220, 220, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(name, NULL, 240, 10, 300, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(handle, NULL, 240, 55, 120, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(about, NULL, 370, 55, 170, 120, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelHandle, NULL, 240, 40, 120, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelAbout, NULL, 370, 40, 170, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelBirthday, NULL, 240, 85, 120, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(birthday, NULL, 240, 100, 120, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hButtonOk, NULL, 240, 145, 55, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hButtonCancel, NULL, 305, 145, 55, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+
+            profile_gallery_metadata = CreateWindowW(
+                L"STATIC", L"",
+                WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+                10, 234, 220, 18,
+                hDlg, NULL, NULL, NULL
+            );
+
+            profile_photo_previous = CreateWindowW('''
+
+s = s.replace(user_block_anchor, user_block_prefix, 1)
+
+# Move the three navigation controls below the metadata line.
+s = s.replace(
+    '''                10, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_PREV_BUTTON, NULL, NULL''',
+    '''                10, 256, 52, 23,
+                hDlg, (HMENU)PROFILE_PREV_BUTTON, NULL, NULL''',
+    1,
+)
+s = s.replace(
+    '''                56, 174, 68, 23,
+                hDlg, NULL, NULL, NULL''',
+    '''                66, 256, 108, 23,
+                hDlg, NULL, NULL, NULL''',
+    1,
+)
+s = s.replace(
+    '''                128, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_NEXT_BUTTON, NULL, NULL''',
+    '''                178, 256, 52, 23,
+                hDlg, (HMENU)PROFILE_NEXT_BUTTON, NULL, NULL''',
+    1,
+)
+
+# The old user-only resize added 30 px vertically. Widen for shifted fields and
+# add enough height for the metadata + navigation row.
+old_resize = r'''            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left,
+                wr.bottom - wr.top + 30,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );'''
+new_resize = r'''            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left + 60,
+                wr.bottom - wr.top + 112,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );'''
+if old_resize not in s:
+    raise SystemExit("Could not locate user profile dialog resize block for v3.")
+s = s.replace(old_resize, new_resize, 1)
+
+# If the user has no avatar, show an explicit metadata message instead of an
+# empty size field. The metadata control already exists at this point.
+placeholder_anchor = '''\t\t\tSendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);'''
+placeholder_replacement = placeholder_anchor + '''\n\t\t\tif (peer->type == 0 && profile_gallery_metadata)\n\t\t\t\tSetWindowTextW(profile_gallery_metadata, L"No image");'''
+if placeholder_anchor not in s:
+    raise SystemExit("Could not locate profile placeholder assignment for v3.")
+s = s.replace(placeholder_anchor, placeholder_replacement, 1)
+
+write(p, s)
+
+# ---------------------------------------------------------------------------
+# response.cpp — current avatar metadata and 220x220 square fit.
+# ---------------------------------------------------------------------------
+s = read(r)
+
+pfp_start = s.find("if (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0)")
+if pfp_start < 0:
+    raise SystemExit("Could not locate current avatar response block for v3.")
+pfp_end = s.find("\n\t\t\tbreak;", pfp_start)
+if pfp_end < 0:
+    raise SystemExit("Could not isolate current avatar response block for v3.")
+pfp_fragment = s[pfp_start:pfp_end]
+
+needle = "\t\t\t\tif (decoded) {\n\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
+replacement = (
+    "\t\t\t\tif (decoded) {\n"
+    "\t\t\t\t\tprofile_gallery_update_metadata(decoded, bytes_len);\n"
+    "\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
+)
+if needle not in pfp_fragment:
+    raise SystemExit("Could not locate current avatar decoded bitmap for metadata.")
+pfp_fragment = pfp_fragment.replace(needle, replacement, 1)
+pfp_fragment = pfp_fragment.replace(
+    "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160,",
+    "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220,",
+    1,
+)
+s = s[:pfp_start] + pfp_fragment + s[pfp_end:]
+
+write(r, s)
+
+# ---------------------------------------------------------------------------
+# v3 verification
+# ---------------------------------------------------------------------------
+checks_v3 = {
+    h: [
+        "profile_navigation_latvianghost_v3",
+        "profile_gallery_update_metadata",
+    ],
+    helpers: [
+        "const int dst_w = 220",
+        "const int dst_h = 220",
+        "profile_gallery_metadata = NULL",
+        "profile_gallery_update_metadata(decoded, bytes_len)",
+    ],
+    p: [
+        "10, 10, 220, 220",
+        "10, 234, 220, 18",
+        "10, 256, 52, 23",
+        "wr.right - wr.left + 60",
+    ],
+    r: [
+        "profile_gallery_update_metadata(decoded, bytes_len)",
+        "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220",
+    ],
+}
+
+for path, tokens in checks_v3.items():
+    text = read(path)
+    for token in tokens:
+        if token not in text:
+            raise SystemExit(
+                f"Profile navigation v3 verification failed in {path.name}: {token}"
+            )
+
+print(
+    "Applied LatvianGhost profile navigation v3: larger 220x220 square avatar "
+    "gallery with pixel dimensions and downloaded preview size."
+)
