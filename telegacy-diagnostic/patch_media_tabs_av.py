@@ -7492,3 +7492,1424 @@ if text.count(
 print(
     "Applied Media A/V v5.3: deterministic inline Play/Pause glyph state."
 )
+
+
+# =============================================================================
+# Media A/V v5.4 - final chat usability polish
+# - preserve chat viewport while older history is prepended
+# - Ctrl+V attaches clipboard files/images to the message composer
+# - smaller video previews in chat, with the same classic Play overlay as Media
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# telegacy.h: DragQueryFileW / HDROP for clipboard file pasting.
+# -----------------------------------------------------------------------------
+s = read(h)
+
+if "#include <shellapi.h>" not in s:
+    anchor = "#include <shlobj.h>"
+
+    if anchor not in s:
+        raise SystemExit(
+            "Could not locate shlobj.h include before adding shellapi.h."
+        )
+
+    s = s.replace(
+        anchor,
+        anchor + "\n#include <shellapi.h>",
+        1,
+    )
+
+write(h, s)
+
+
+# -----------------------------------------------------------------------------
+# response.cpp: process a getHistory page as one visual transaction and keep
+# the same message anchored at the same pixel position in the chat viewport.
+# This avoids the classic "scroll to bottom while loading older messages".
+# -----------------------------------------------------------------------------
+s = read(r)
+
+if "history_view_anchor_v54" not in s:
+    history_anchor = r'''\t\tint messages_count_old = messages.size();
+\t\tint documents_count_old = documents.size();
+\t\tfor (int i = 0; i < count; i++) offset_msg += message_handler(true, unenc_response + offset_msg, false, false, false);'''.replace('\\t', '\t')
+
+    history_replacement = r'''\t\tint messages_count_old = messages.size();
+\t\tint documents_count_old = documents.size();
+
+\t\t// history_view_anchor_v54
+\t\t// Older history is prepended.  Remember the first visible message and
+\t\t// its exact client-pixel position, suppress intermediate redraw/scroll
+\t\t// changes, then restore that anchor after the whole Telegram page is in.
+\t\tbool history_keep_view =
+\t\t\tmessages_count_old > 0 &&
+\t\t\tcount > 0;
+
+\t\tbool history_old_drawchat = drawchat;
+\t\tint history_anchor_message_id = 0;
+\t\tint history_anchor_char_offset = 0;
+\t\tPOINTL history_anchor_before = {0, 0};
+\t\tPOINT history_scroll_before = {0, 0};
+\t\tSCROLLINFO history_scrollbar_before = {0};
+
+\t\tif (history_keep_view) {
+\t\t\thistory_scrollbar_before.cbSize =
+\t\t\t\tsizeof(history_scrollbar_before);
+\t\t\thistory_scrollbar_before.fMask =
+\t\t\t\tSIF_RANGE |
+\t\t\t\tSIF_PAGE |
+\t\t\t\tSIF_POS;
+
+\t\t\tGetScrollInfo(
+\t\t\t\tchat,
+\t\t\t\tSB_VERT,
+\t\t\t\t&history_scrollbar_before
+\t\t\t);
+
+\t\t\tSendMessageW(
+\t\t\t\tchat,
+\t\t\t\tEM_GETSCROLLPOS,
+\t\t\t\t0,
+\t\t\t\t(LPARAM)&history_scroll_before
+\t\t\t);
+
+\t\t\tRECT history_rect = {0};
+\t\t\tSendMessageW(
+\t\t\t\tchat,
+\t\t\t\tEM_GETRECT,
+\t\t\t\t0,
+\t\t\t\t(LPARAM)&history_rect
+\t\t\t);
+
+\t\t\tPOINTL history_probe = {
+\t\t\t\thistory_rect.left + 2,
+\t\t\t\thistory_rect.top + 2
+\t\t\t};
+
+\t\t\tint history_top_char =
+\t\t\t\t(int)SendMessageW(
+\t\t\t\t\tchat,
+\t\t\t\t\tEM_CHARFROMPOS,
+\t\t\t\t\t0,
+\t\t\t\t\t(LPARAM)&history_probe
+\t\t\t\t);
+
+\t\t\tfor (
+\t\t\t\tint i = 0;
+\t\t\t\ti < (int)messages.size();
+\t\t\t\ti++
+\t\t\t) {
+\t\t\t\tif (
+\t\t\t\t\thistory_top_char >= messages[i].start_char &&
+\t\t\t\t\thistory_top_char <= messages[i].end_footer
+\t\t\t\t) {
+\t\t\t\t\thistory_anchor_message_id = messages[i].id;
+\t\t\t\t\thistory_anchor_char_offset =
+\t\t\t\t\t\thistory_top_char -
+\t\t\t\t\t\tmessages[i].start_char;
+
+\t\t\t\t\tSendMessageW(
+\t\t\t\t\t\tchat,
+\t\t\t\t\t\tEM_POSFROMCHAR,
+\t\t\t\t\t\t(WPARAM)&history_anchor_before,
+\t\t\t\t\t\t(LPARAM)history_top_char
+\t\t\t\t\t);
+
+\t\t\t\t\tbreak;
+\t\t\t\t}
+\t\t\t}
+
+\t\t\tSendMessageW(
+\t\t\t\tchat,
+\t\t\t\tWM_SETREDRAW,
+\t\t\t\tFALSE,
+\t\t\t\t0
+\t\t\t);
+
+\t\t\tdrawchat = false;
+\t\t}
+
+\t\tfor (int i = 0; i < count; i++)
+\t\t\toffset_msg +=
+\t\t\t\tmessage_handler(
+\t\t\t\t\ttrue,
+\t\t\t\t\tunenc_response + offset_msg,
+\t\t\t\t\tfalse,
+\t\t\t\t\tfalse,
+\t\t\t\t\tfalse
+\t\t\t\t);'''.replace('\\t', '\t')
+
+    if history_anchor not in s:
+        raise SystemExit(
+            "Could not locate getHistory message batch for viewport preservation."
+        )
+
+    s = s.replace(
+        history_anchor,
+        history_replacement,
+        1,
+    )
+
+    restore_anchor = "\t\tget_unknown_custom_emojis();"
+
+    restore_code = r'''\t\tif (history_keep_view) {
+\t\t\tdrawchat = history_old_drawchat;
+
+\t\t\tbool history_restored = false;
+
+\t\t\tif (history_anchor_message_id != 0) {
+\t\t\t\tfor (
+\t\t\t\t\tint i = 0;
+\t\t\t\t\ti < (int)messages.size();
+\t\t\t\t\ti++
+\t\t\t\t) {
+\t\t\t\t\tif (
+\t\t\t\t\t\tmessages[i].id ==
+\t\t\t\t\t\thistory_anchor_message_id
+\t\t\t\t\t) {
+\t\t\t\t\t\tint history_new_char =
+\t\t\t\t\t\t\tmessages[i].start_char +
+\t\t\t\t\t\t\thistory_anchor_char_offset;
+
+\t\t\t\t\t\tif (
+\t\t\t\t\t\t\thistory_new_char >
+\t\t\t\t\t\t\tmessages[i].end_footer
+\t\t\t\t\t\t) {
+\t\t\t\t\t\t\thistory_new_char =
+\t\t\t\t\t\t\t\tmessages[i].end_footer;
+\t\t\t\t\t\t}
+
+\t\t\t\t\t\tPOINTL history_anchor_after = {0, 0};
+\t\t\t\t\t\tPOINT history_scroll_after = {0, 0};
+
+\t\t\t\t\t\tSendMessageW(
+\t\t\t\t\t\t\tchat,
+\t\t\t\t\t\t\tEM_POSFROMCHAR,
+\t\t\t\t\t\t\t(WPARAM)&history_anchor_after,
+\t\t\t\t\t\t\t(LPARAM)history_new_char
+\t\t\t\t\t\t);
+
+\t\t\t\t\t\tSendMessageW(
+\t\t\t\t\t\t\tchat,
+\t\t\t\t\t\t\tEM_GETSCROLLPOS,
+\t\t\t\t\t\t\t0,
+\t\t\t\t\t\t\t(LPARAM)&history_scroll_after
+\t\t\t\t\t\t);
+
+\t\t\t\t\t\tPOINT history_target =
+\t\t\t\t\t\t\thistory_scroll_after;
+
+\t\t\t\t\t\thistory_target.y +=
+\t\t\t\t\t\t\thistory_anchor_after.y -
+\t\t\t\t\t\t\thistory_anchor_before.y;
+
+\t\t\t\t\t\tif (history_target.y < 0)
+\t\t\t\t\t\t\thistory_target.y = 0;
+
+\t\t\t\t\t\tSendMessageW(
+\t\t\t\t\t\t\tchat,
+\t\t\t\t\t\t\tEM_SETSCROLLPOS,
+\t\t\t\t\t\t\t0,
+\t\t\t\t\t\t\t(LPARAM)&history_target
+\t\t\t\t\t\t);
+
+\t\t\t\t\t\thistory_restored = true;
+\t\t\t\t\t\tbreak;
+\t\t\t\t\t}
+\t\t\t\t}
+\t\t\t}
+
+\t\t\t// Fallback for unusual service-only pages where the old top message
+\t\t\t// cannot be identified: preserve scroll by total range growth.
+\t\t\tif (!history_restored) {
+\t\t\t\tSCROLLINFO history_scrollbar_after = {0};
+\t\t\t\thistory_scrollbar_after.cbSize =
+\t\t\t\t\tsizeof(history_scrollbar_after);
+\t\t\t\thistory_scrollbar_after.fMask =
+\t\t\t\t\tSIF_RANGE |
+\t\t\t\t\tSIF_PAGE |
+\t\t\t\t\tSIF_POS;
+
+\t\t\t\tGetScrollInfo(
+\t\t\t\t\tchat,
+\t\t\t\t\tSB_VERT,
+\t\t\t\t\t&history_scrollbar_after
+\t\t\t\t);
+
+\t\t\t\tint history_target_pos =
+\t\t\t\t\thistory_scrollbar_before.nPos +
+\t\t\t\t\t(
+\t\t\t\t\t\thistory_scrollbar_after.nMax -
+\t\t\t\t\t\thistory_scrollbar_before.nMax
+\t\t\t\t\t);
+
+\t\t\t\tint history_max_pos =
+\t\t\t\t\thistory_scrollbar_after.nMax -
+\t\t\t\t\t(int)history_scrollbar_after.nPage +
+\t\t\t\t\t1;
+
+\t\t\t\tif (history_max_pos < 0)
+\t\t\t\t\thistory_max_pos = 0;
+
+\t\t\t\tif (history_target_pos < 0)
+\t\t\t\t\thistory_target_pos = 0;
+
+\t\t\t\tif (history_target_pos > history_max_pos)
+\t\t\t\t\thistory_target_pos = history_max_pos;
+
+\t\t\t\thistory_scrollbar_after.fMask = SIF_POS;
+\t\t\t\thistory_scrollbar_after.nPos = history_target_pos;
+
+\t\t\t\tSetScrollInfo(
+\t\t\t\t\tchat,
+\t\t\t\t\tSB_VERT,
+\t\t\t\t\t&history_scrollbar_after,
+\t\t\t\t\tTRUE
+\t\t\t\t);
+
+\t\t\t\tSendMessageW(
+\t\t\t\t\tchat,
+\t\t\t\t\tWM_VSCROLL,
+\t\t\t\t\tMAKEWPARAM(
+\t\t\t\t\t\tSB_THUMBPOSITION,
+\t\t\t\t\t\thistory_target_pos
+\t\t\t\t\t),
+\t\t\t\t\t0
+\t\t\t\t);
+\t\t\t}
+
+\t\t\tSendMessageW(
+\t\t\t\tchat,
+\t\t\t\tWM_SETREDRAW,
+\t\t\t\tTRUE,
+\t\t\t\t0
+\t\t\t);
+
+\t\t\tRedrawWindow(
+\t\t\t\tchat,
+\t\t\t\tNULL,
+\t\t\t\tNULL,
+\t\t\t\tRDW_INVALIDATE |
+\t\t\t\tRDW_UPDATENOW |
+\t\t\t\tRDW_ALLCHILDREN
+\t\t\t);
+\t\t}
+
+\t\tget_unknown_custom_emojis();'''.replace('\\t', '\t')
+
+    if restore_anchor not in s:
+        raise SystemExit(
+            "Could not locate getHistory completion point for viewport restore."
+        )
+
+    s = s.replace(
+        restore_anchor,
+        restore_code,
+        1,
+    )
+
+write(r, s)
+
+
+# -----------------------------------------------------------------------------
+# procs.cpp: Ctrl+V in the message input attaches files/images from Clipboard.
+# Text-only clipboard data still falls through to RichEdit's normal paste.
+# -----------------------------------------------------------------------------
+s = read(p)
+
+if "clipboard_attachment_v54" not in s:
+    msg_input_pos = s.find(
+        "LRESULT CALLBACK WndProcMsgInput("
+    )
+
+    if msg_input_pos < 0:
+        raise SystemExit(
+            "Could not locate WndProcMsgInput for clipboard attachment support."
+        )
+
+    clipboard_helpers = r'''
+// clipboard_attachment_v54
+static LONG telegacy_clipboard_serial = 0;
+
+static bool telegacy_clipboard_make_temp_path(
+    const wchar_t* extension,
+    wchar_t* out,
+    int out_count
+) {
+    if (!extension || !out || out_count < 32)
+        return false;
+
+    wchar_t temp[MAX_PATH] = {0};
+
+    DWORD len =
+        GetTempPathW(
+            ARRAYSIZE(temp),
+            temp
+        );
+
+    if (!len || len >= ARRAYSIZE(temp))
+        return false;
+
+    wchar_t dir[MAX_PATH] = {0};
+
+    _snwprintf(
+        dir,
+        ARRAYSIZE(dir) - 1,
+        L"%sTelegacyClipboard",
+        temp
+    );
+
+    dir[ARRAYSIZE(dir) - 1] = 0;
+    CreateDirectoryW(dir, NULL);
+
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+
+    LONG serial =
+        InterlockedIncrement(
+            &telegacy_clipboard_serial
+        );
+
+    _snwprintf(
+        out,
+        out_count - 1,
+        L"%s\\clipboard_%04d%02d%02d_%02d%02d%02d_%03d_%ld%s",
+        dir,
+        st.wYear,
+        st.wMonth,
+        st.wDay,
+        st.wHour,
+        st.wMinute,
+        st.wSecond,
+        st.wMilliseconds,
+        serial,
+        extension
+    );
+
+    out[out_count - 1] = 0;
+    return true;
+}
+
+static bool telegacy_clipboard_write_bytes(
+    const wchar_t* path,
+    const void* data,
+    DWORD size
+) {
+    if (!path || !data || !size)
+        return false;
+
+    HANDLE file =
+        CreateFileW(
+            path,
+            GENERIC_WRITE,
+            0,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+
+    DWORD written = 0;
+
+    bool ok =
+        WriteFile(
+            file,
+            data,
+            size,
+            &written,
+            NULL
+        ) &&
+        written == size;
+
+    CloseHandle(file);
+
+    if (!ok)
+        DeleteFileW(path);
+
+    return ok;
+}
+
+static bool telegacy_clipboard_write_dib(
+    HGLOBAL dib_handle,
+    const wchar_t* path
+) {
+    if (!dib_handle || !path)
+        return false;
+
+    SIZE_T dib_size =
+        GlobalSize(dib_handle);
+
+    if (
+        dib_size < sizeof(BITMAPINFOHEADER) ||
+        dib_size > 0x7fffffff
+    ) {
+        return false;
+    }
+
+    BYTE* dib =
+        (BYTE*)GlobalLock(
+            dib_handle
+        );
+
+    if (!dib)
+        return false;
+
+    BITMAPINFOHEADER* info =
+        (BITMAPINFOHEADER*)dib;
+
+    if (
+        info->biSize < sizeof(BITMAPINFOHEADER) ||
+        info->biSize > dib_size
+    ) {
+        GlobalUnlock(dib_handle);
+        return false;
+    }
+
+    DWORD masks = 0;
+
+    if (
+        info->biSize == sizeof(BITMAPINFOHEADER) &&
+        (
+            info->biCompression == BI_BITFIELDS ||
+            info->biCompression == 6
+        )
+    ) {
+        masks =
+            info->biCompression == 6
+                ? 16
+                : 12;
+    }
+
+    DWORD colors = info->biClrUsed;
+
+    if (
+        !colors &&
+        info->biBitCount > 0 &&
+        info->biBitCount <= 8
+    ) {
+        colors =
+            1u << info->biBitCount;
+    }
+
+    BITMAPFILEHEADER file_header = {0};
+    file_header.bfType = 0x4D42;
+    file_header.bfOffBits =
+        sizeof(BITMAPFILEHEADER) +
+        info->biSize +
+        masks +
+        colors * sizeof(RGBQUAD);
+    file_header.bfSize =
+        sizeof(BITMAPFILEHEADER) +
+        (DWORD)dib_size;
+
+    HANDLE file =
+        CreateFileW(
+            path,
+            GENERIC_WRITE,
+            0,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+
+    if (file == INVALID_HANDLE_VALUE) {
+        GlobalUnlock(dib_handle);
+        return false;
+    }
+
+    DWORD written = 0;
+
+    bool ok =
+        WriteFile(
+            file,
+            &file_header,
+            sizeof(file_header),
+            &written,
+            NULL
+        ) &&
+        written == sizeof(file_header);
+
+    if (ok) {
+        written = 0;
+        ok =
+            WriteFile(
+                file,
+                dib,
+                (DWORD)dib_size,
+                &written,
+                NULL
+            ) &&
+            written == (DWORD)dib_size;
+    }
+
+    CloseHandle(file);
+    GlobalUnlock(dib_handle);
+
+    if (!ok)
+        DeleteFileW(path);
+
+    return ok;
+}
+
+static bool telegacy_clipboard_write_bitmap(
+    HBITMAP bitmap,
+    const wchar_t* path
+) {
+    if (!bitmap || !path)
+        return false;
+
+    BITMAP bm = {0};
+
+    if (!GetObject(
+        bitmap,
+        sizeof(bm),
+        &bm
+    )) {
+        return false;
+    }
+
+    if (
+        bm.bmWidth <= 0 ||
+        bm.bmHeight <= 0
+    ) {
+        return false;
+    }
+
+    BITMAPINFO info = {0};
+    info.bmiHeader.biSize =
+        sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth =
+        bm.bmWidth;
+    info.bmiHeader.biHeight =
+        bm.bmHeight;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    DWORD stride =
+        ((bm.bmWidth * 32 + 31) / 32) * 4;
+
+    DWORD image_size =
+        stride * bm.bmHeight;
+
+    std::vector<BYTE> bits(
+        image_size
+    );
+
+    HDC dc = GetDC(NULL);
+
+    if (!dc)
+        return false;
+
+    int rows =
+        GetDIBits(
+            dc,
+            bitmap,
+            0,
+            bm.bmHeight,
+            &bits[0],
+            &info,
+            DIB_RGB_COLORS
+        );
+
+    ReleaseDC(NULL, dc);
+
+    if (rows != bm.bmHeight)
+        return false;
+
+    BITMAPFILEHEADER file_header = {0};
+    file_header.bfType = 0x4D42;
+    file_header.bfOffBits =
+        sizeof(BITMAPFILEHEADER) +
+        sizeof(BITMAPINFOHEADER);
+    file_header.bfSize =
+        file_header.bfOffBits +
+        image_size;
+
+    HANDLE file =
+        CreateFileW(
+            path,
+            GENERIC_WRITE,
+            0,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+
+    if (file == INVALID_HANDLE_VALUE)
+        return false;
+
+    DWORD written = 0;
+
+    bool ok =
+        WriteFile(
+            file,
+            &file_header,
+            sizeof(file_header),
+            &written,
+            NULL
+        ) &&
+        written == sizeof(file_header);
+
+    if (ok) {
+        written = 0;
+        ok =
+            WriteFile(
+                file,
+                &info.bmiHeader,
+                sizeof(info.bmiHeader),
+                &written,
+                NULL
+            ) &&
+            written == sizeof(info.bmiHeader);
+    }
+
+    if (ok) {
+        written = 0;
+        ok =
+            WriteFile(
+                file,
+                &bits[0],
+                image_size,
+                &written,
+                NULL
+            ) &&
+            written == image_size;
+    }
+
+    CloseHandle(file);
+
+    if (!ok)
+        DeleteFileW(path);
+
+    return ok;
+}
+
+static bool telegacy_clipboard_add_path(
+    const wchar_t* path,
+    bool* edit_prepared
+) {
+    if (!path || !path[0])
+        return false;
+
+    wchar_t* copy =
+        _wcsdup(path);
+
+    if (!copy)
+        return false;
+
+    if (
+        editing_msg_id &&
+        edit_prepared &&
+        !*edit_prepared
+    ) {
+        for (
+            int i = 0;
+            i < (int)files.size();
+            i++
+        ) {
+            free(files[i]);
+        }
+
+        files.clear();
+        *edit_prepared = true;
+    }
+
+    files.push_back(copy);
+    return true;
+}
+
+static bool telegacy_clipboard_attach(
+    HWND owner
+) {
+    if (!OpenClipboard(owner))
+        return false;
+
+    bool handled = false;
+    bool edit_prepared = false;
+
+    if (IsClipboardFormatAvailable(CF_HDROP)) {
+        HDROP drop =
+            (HDROP)GetClipboardData(
+                CF_HDROP
+            );
+
+        if (drop) {
+            UINT count =
+                DragQueryFileW(
+                    drop,
+                    0xFFFFFFFF,
+                    NULL,
+                    0
+                );
+
+            if (editing_msg_id && count > 1)
+                count = 1;
+
+            for (
+                UINT i = 0;
+                i < count;
+                i++
+            ) {
+                wchar_t path[MAX_PATH] = {0};
+
+                if (
+                    DragQueryFileW(
+                        drop,
+                        i,
+                        path,
+                        ARRAYSIZE(path)
+                    ) &&
+                    path[0]
+                ) {
+                    handled |=
+                        telegacy_clipboard_add_path(
+                            path,
+                            &edit_prepared
+                        );
+                }
+            }
+        }
+    }
+
+    if (!handled) {
+        UINT png_format =
+            RegisterClipboardFormatW(
+                L"PNG"
+            );
+
+        if (
+            png_format &&
+            IsClipboardFormatAvailable(
+                png_format
+            )
+        ) {
+            HGLOBAL png =
+                (HGLOBAL)GetClipboardData(
+                    png_format
+                );
+
+            if (png) {
+                SIZE_T size = GlobalSize(png);
+                void* data = GlobalLock(png);
+
+                if (
+                    data &&
+                    size > 0 &&
+                    size <= 0x7fffffff
+                ) {
+                    wchar_t path[MAX_PATH] = {0};
+
+                    if (
+                        telegacy_clipboard_make_temp_path(
+                            L".png",
+                            path,
+                            ARRAYSIZE(path)
+                        ) &&
+                        telegacy_clipboard_write_bytes(
+                            path,
+                            data,
+                            (DWORD)size
+                        )
+                    ) {
+                        handled =
+                            telegacy_clipboard_add_path(
+                                path,
+                                &edit_prepared
+                            );
+                    }
+                }
+
+                if (data)
+                    GlobalUnlock(png);
+            }
+        }
+    }
+
+    if (!handled) {
+        UINT format = 0;
+
+        if (IsClipboardFormatAvailable(CF_DIBV5))
+            format = CF_DIBV5;
+        else if (IsClipboardFormatAvailable(CF_DIB))
+            format = CF_DIB;
+
+        if (format) {
+            HGLOBAL dib =
+                (HGLOBAL)GetClipboardData(
+                    format
+                );
+
+            wchar_t path[MAX_PATH] = {0};
+
+            if (
+                dib &&
+                telegacy_clipboard_make_temp_path(
+                    L".bmp",
+                    path,
+                    ARRAYSIZE(path)
+                ) &&
+                telegacy_clipboard_write_dib(
+                    dib,
+                    path
+                )
+            ) {
+                handled =
+                    telegacy_clipboard_add_path(
+                        path,
+                        &edit_prepared
+                    );
+            }
+        }
+    }
+
+    if (
+        !handled &&
+        IsClipboardFormatAvailable(CF_BITMAP)
+    ) {
+        HBITMAP bitmap =
+            (HBITMAP)GetClipboardData(
+                CF_BITMAP
+            );
+
+        wchar_t path[MAX_PATH] = {0};
+
+        if (
+            bitmap &&
+            telegacy_clipboard_make_temp_path(
+                L".bmp",
+                path,
+                ARRAYSIZE(path)
+            ) &&
+            telegacy_clipboard_write_bitmap(
+                bitmap,
+                path
+            )
+        ) {
+            handled =
+                telegacy_clipboard_add_path(
+                    path,
+                    &edit_prepared
+                );
+        }
+    }
+
+    CloseClipboard();
+
+    if (handled) {
+        SendMessage(
+            hToolbar,
+            TB_CHANGEBITMAP,
+            4,
+            MAKELPARAM(14, 0)
+        );
+
+        open_files_list();
+        SetFocus(msgInput);
+    }
+
+    return handled;
+}
+
+'''
+
+    s = (
+        s[:msg_input_pos]
+        + clipboard_helpers
+        + s[msg_input_pos:]
+    )
+
+    start, end = function_range(
+        s,
+        "LRESULT CALLBACK WndProcMsgInput("
+    )
+
+    proc = s[start:end]
+
+    proc_anchor = '''\tswitch (msg) {\n\tcase WM_CHAR:'''
+    proc_new = '''\tswitch (msg) {\n\tcase WM_PASTE:\n\t\tif (telegacy_clipboard_attach(hWnd))\n\t\t\treturn 0;\n\t\tbreak;\n\tcase WM_CHAR:'''
+
+    if proc_anchor not in proc:
+        raise SystemExit(
+            "Could not locate WndProcMsgInput switch for WM_PASTE handling."
+        )
+
+    proc = proc.replace(
+        proc_anchor,
+        proc_new,
+        1,
+    )
+
+    s = s[:start] + proc + s[end:]
+
+write(p, s)
+
+
+# -----------------------------------------------------------------------------
+# message.cpp: make the first in-chat video placeholder compact and styled the
+# same way as the Media gallery card.
+# -----------------------------------------------------------------------------
+s = read(m)
+
+if "media_chat_video_placeholder_v54" not in s:
+    placeholder_v54 = r'''static HBITMAP media_chat_video_placeholder() {
+    // media_chat_video_placeholder_v54
+    const int width = 112;
+    const int height = 84;
+
+    HDC screen = GetDC(NULL);
+    if (!screen)
+        return NULL;
+
+    HBITMAP bitmap =
+        CreateCompatibleBitmap(
+            screen,
+            width,
+            height
+        );
+
+    ReleaseDC(NULL, screen);
+
+    if (!bitmap)
+        return NULL;
+
+    HDC dc = CreateCompatibleDC(NULL);
+    HGDIOBJ old_bitmap =
+        SelectObject(dc, bitmap);
+
+    RECT all = {0, 0, width, height};
+    FillRect(
+        dc,
+        &all,
+        GetSysColorBrush(COLOR_3DFACE)
+    );
+    DrawEdge(
+        dc,
+        &all,
+        EDGE_SUNKEN,
+        BF_RECT
+    );
+
+    RECT button = {
+        width / 2 - 15,
+        height / 2 - 15,
+        width / 2 + 15,
+        height / 2 + 15
+    };
+
+    FillRect(
+        dc,
+        &button,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+    DrawEdge(
+        dc,
+        &button,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    int cx = width / 2;
+    int cy = height / 2;
+
+    POINT tri[3] = {
+        {cx - 5, cy - 8},
+        {cx - 5, cy + 8},
+        {cx + 8, cy}
+    };
+
+    HBRUSH brush =
+        CreateSolidBrush(
+            GetSysColor(COLOR_BTNTEXT)
+        );
+    HPEN pen =
+        CreatePen(
+            PS_SOLID,
+            1,
+            GetSysColor(COLOR_BTNTEXT)
+        );
+
+    HGDIOBJ old_brush =
+        SelectObject(dc, brush);
+    HGDIOBJ old_pen =
+        SelectObject(dc, pen);
+
+    Polygon(dc, tri, 3);
+
+    SelectObject(dc, old_pen);
+    SelectObject(dc, old_brush);
+    DeleteObject(pen);
+    DeleteObject(brush);
+
+    SelectObject(dc, old_bitmap);
+    DeleteDC(dc);
+
+    return bitmap;
+}'''
+
+    s = replace_function(
+        s,
+        "static HBITMAP media_chat_video_placeholder()",
+        placeholder_v54,
+    )
+
+write(m, s)
+
+
+# -----------------------------------------------------------------------------
+# helpers.cpp: when Telegram's real video JPEG thumbnail arrives, resize it to
+# the same compact chat card and paint the classic Play button on top BEFORE
+# replace_in_chat() inserts it.  This keeps patch_media_links_gallery.py's
+# response.cpp anchor unchanged and therefore remains compatible with it.
+# -----------------------------------------------------------------------------
+s = read(g)
+
+if "media_chat_video_preview_v54" not in s:
+    replace_pos = s.find(
+        "int replace_in_chat("
+    )
+
+    if replace_pos < 0:
+        raise SystemExit(
+            "Could not locate replace_in_chat for compact video previews."
+        )
+
+    video_helper = r'''
+// media_chat_video_preview_v54
+static HBITMAP media_chat_make_video_preview(
+    HBITMAP source
+) {
+    if (!source)
+        return NULL;
+
+    BITMAP bm = {0};
+
+    if (!GetObject(
+        source,
+        sizeof(bm),
+        &bm
+    )) {
+        return NULL;
+    }
+
+    if (
+        bm.bmWidth <= 0 ||
+        bm.bmHeight <= 0
+    ) {
+        return NULL;
+    }
+
+    const int width = 112;
+    const int height = 84;
+    const int inset = 3;
+
+    HDC screen = GetDC(NULL);
+    if (!screen)
+        return NULL;
+
+    HBITMAP result =
+        CreateCompatibleBitmap(
+            screen,
+            width,
+            height
+        );
+
+    if (!result) {
+        ReleaseDC(NULL, screen);
+        return NULL;
+    }
+
+    HDC dst = CreateCompatibleDC(screen);
+    HDC src = CreateCompatibleDC(screen);
+
+    ReleaseDC(NULL, screen);
+
+    if (!dst || !src) {
+        if (dst) DeleteDC(dst);
+        if (src) DeleteDC(src);
+        DeleteObject(result);
+        return NULL;
+    }
+
+    HGDIOBJ old_dst =
+        SelectObject(dst, result);
+    HGDIOBJ old_src =
+        SelectObject(src, source);
+
+    RECT all = {0, 0, width, height};
+    FillRect(
+        dst,
+        &all,
+        (HBRUSH)GetStockObject(BLACK_BRUSH)
+    );
+
+    int area_w = width - inset * 2;
+    int area_h = height - inset * 2;
+
+    double scale_x =
+        (double)area_w /
+        (double)bm.bmWidth;
+    double scale_y =
+        (double)area_h /
+        (double)bm.bmHeight;
+    double scale =
+        scale_x < scale_y
+            ? scale_x
+            : scale_y;
+
+    int draw_w =
+        (int)(bm.bmWidth * scale + 0.5);
+    int draw_h =
+        (int)(bm.bmHeight * scale + 0.5);
+
+    if (draw_w < 1) draw_w = 1;
+    if (draw_h < 1) draw_h = 1;
+
+    int draw_x =
+        (width - draw_w) / 2;
+    int draw_y =
+        (height - draw_h) / 2;
+
+    SetStretchBltMode(
+        dst,
+        HALFTONE
+    );
+
+    SetBrushOrgEx(
+        dst,
+        0,
+        0,
+        NULL
+    );
+
+    StretchBlt(
+        dst,
+        draw_x,
+        draw_y,
+        draw_w,
+        draw_h,
+        src,
+        0,
+        0,
+        bm.bmWidth,
+        bm.bmHeight,
+        SRCCOPY
+    );
+
+    DrawEdge(
+        dst,
+        &all,
+        EDGE_SUNKEN,
+        BF_RECT
+    );
+
+    RECT button = {
+        width / 2 - 15,
+        height / 2 - 15,
+        width / 2 + 15,
+        height / 2 + 15
+    };
+
+    FillRect(
+        dst,
+        &button,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+
+    DrawEdge(
+        dst,
+        &button,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    int cx = width / 2;
+    int cy = height / 2;
+
+    POINT tri[3] = {
+        {cx - 5, cy - 8},
+        {cx - 5, cy + 8},
+        {cx + 8, cy}
+    };
+
+    HBRUSH glyph_brush =
+        CreateSolidBrush(
+            GetSysColor(COLOR_BTNTEXT)
+        );
+
+    HPEN glyph_pen =
+        CreatePen(
+            PS_SOLID,
+            1,
+            GetSysColor(COLOR_BTNTEXT)
+        );
+
+    HGDIOBJ old_brush =
+        SelectObject(
+            dst,
+            glyph_brush
+        );
+    HGDIOBJ old_pen =
+        SelectObject(
+            dst,
+            glyph_pen
+        );
+
+    Polygon(
+        dst,
+        tri,
+        3
+    );
+
+    SelectObject(dst, old_pen);
+    SelectObject(dst, old_brush);
+    DeleteObject(glyph_pen);
+    DeleteObject(glyph_brush);
+
+    SelectObject(src, old_src);
+    SelectObject(dst, old_dst);
+    DeleteDC(src);
+    DeleteDC(dst);
+
+    return result;
+}
+
+'''
+
+    s = (
+        s[:replace_pos]
+        + video_helper
+        + s[replace_pos:]
+    )
+
+    start, end = function_range(
+        s,
+        "int replace_in_chat("
+    )
+
+    func = s[start:end]
+
+    bitmap_old = r'''\t\t} else if (hBitmap) {
+\t\t\tCHARFORMAT2 cf;
+\t\t\tcf.cbSize = sizeof(CHARFORMAT2);
+\t\t\tcf.dwMask = CFM_LINK;
+\t\t\tSendMessage(chat, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+\t\t\tinsert_image(chat, NULL, hBitmap);
+\t\t\tSendMessage(chat, EM_SETSEL, min, max);
+\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+\t\t\tdiff = 0;'''.replace('\\t', '\t')
+
+    bitmap_new = r'''\t\t} else if (hBitmap) {
+\t\t\tCHARFORMAT2 cf;
+\t\t\tcf.cbSize = sizeof(CHARFORMAT2);
+\t\t\tcf.dwMask = CFM_LINK;
+\t\t\tSendMessage(chat, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+
+\t\t\tHBITMAP display_bitmap = hBitmap;
+\t\t\tHBITMAP video_preview = NULL;
+
+\t\t\tfor (
+\t\t\t\tint k = 0;
+\t\t\t\tk < (int)documents.size();
+\t\t\t\tk++
+\t\t\t) {
+\t\t\t\tif (
+\t\t\t\t\tdocuments[k].photo_size == 3 &&
+\t\t\t\t\tdocuments[k].visible &&
+\t\t\t\t\tdocuments[k].min == min &&
+\t\t\t\t\tdocuments[k].max == max
+\t\t\t\t) {
+\t\t\t\t\tvideo_preview =
+\t\t\t\t\t\tmedia_chat_make_video_preview(
+\t\t\t\t\t\t\thBitmap
+\t\t\t\t\t\t);
+
+\t\t\t\t\tif (video_preview)
+\t\t\t\t\t\tdisplay_bitmap = video_preview;
+
+\t\t\t\t\tbreak;
+\t\t\t\t}
+\t\t\t}
+
+\t\t\tinsert_image(
+\t\t\t\tchat,
+\t\t\t\tNULL,
+\t\t\t\tdisplay_bitmap
+\t\t\t);
+
+\t\t\tif (video_preview)
+\t\t\t\tDeleteObject(video_preview);
+
+\t\t\tSendMessage(chat, EM_SETSEL, min, max);
+\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+\t\t\tdiff = 0;'''.replace('\\t', '\t')
+
+    if bitmap_old not in func:
+        raise SystemExit(
+            "Could not locate bitmap replacement branch in replace_in_chat."
+        )
+
+    func = func.replace(
+        bitmap_old,
+        bitmap_new,
+        1,
+    )
+
+    s = s[:start] + func + s[end:]
+
+write(g, s)
+
+
+# -----------------------------------------------------------------------------
+# v5.4 verification
+# -----------------------------------------------------------------------------
+checks_v54 = {
+    h: [
+        "#include <shellapi.h>",
+    ],
+    r: [
+        "history_view_anchor_v54",
+        "EM_GETSCROLLPOS",
+        "EM_SETSCROLLPOS",
+        "drawchat = false",
+    ],
+    p: [
+        "clipboard_attachment_v54",
+        "case WM_PASTE:",
+        "CF_HDROP",
+        "CF_DIBV5",
+        "bool* edit_prepared",
+        'RegisterClipboardFormatW(\n                L"PNG"',
+        "open_files_list();",
+    ],
+    m: [
+        "media_chat_video_placeholder_v54",
+        "const int width = 112;",
+        "const int height = 84;",
+    ],
+    g: [
+        "media_chat_video_preview_v54",
+        "media_chat_make_video_preview(",
+        "documents[k].photo_size == 3",
+    ],
+}
+
+for path, tokens in checks_v54.items():
+    text = read(path)
+
+    for token in tokens:
+        if token not in text:
+            raise SystemExit(
+                f"Media v5.4 verification failed in {path.name}: {token}"
+            )
+
+print(
+    "Applied Media v5.4: stable history viewport, Ctrl+V clipboard attachments, "
+    "and compact in-chat video previews with a classic Play overlay."
+)
