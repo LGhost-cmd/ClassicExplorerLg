@@ -96,6 +96,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_links_gallery.py" "telegacy-src"
 
+      - name: Add profile navigation and avatar gallery
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_profiles_navigation.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
