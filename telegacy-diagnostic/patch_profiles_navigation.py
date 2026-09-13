@@ -1099,7 +1099,569 @@ for path, tokens in checks.items():
         if token not in text:
             raise SystemExit(f"Profile navigation verification failed in {path.name}: {token}")
 
+
+
+# =============================================================================
+# v2 stability / layout fixes
+# =============================================================================
+t = root / "src" / "telegacy.cpp"
+if not t.exists():
+    raise SystemExit(f"Missing expected Telegacy file: {t}")
+
+# ---------------------------------------------------------------------------
+# telegacy.h: v2 marker, fixed dialog page size, shared bitmap fitter
+# ---------------------------------------------------------------------------
+s = read(h)
+marker = "// profile_navigation_latvianghost_v1"
+if marker not in s:
+    raise SystemExit("Profile navigation v1 marker missing in telegacy.h.")
+s = s.replace(
+    marker,
+    marker
+    + "\n// profile_navigation_latvianghost_v2"
+    + "\n#define LATVIANGHOST_DIALOGS_PAGE_SIZE 50"
+    + "\nHBITMAP profile_gallery_fit_bitmap(HBITMAP source);",
+    1,
+)
+write(h, s)
+
+# ---------------------------------------------------------------------------
+# helpers.cpp: safer gallery state, bounded request buffers, 160x160 fit,
+#              and larger messages.getDialogs pages.
+# ---------------------------------------------------------------------------
+s = read(helpers)
+
+s = s.replace(
+    "static Peer* profile_gallery_peer = NULL;\n"
+    "static HWND profile_gallery_picture = NULL;",
+    "static BYTE profile_gallery_peer_id[8] = {0};\n"
+    "static bool profile_gallery_peer_had_current_photo = false;\n"
+    "static HWND profile_gallery_picture = NULL;",
+    1,
+)
+
+s = s.replace(
+    "    profile_gallery_peer = NULL;\n"
+    "    profile_gallery_picture = NULL;",
+    "    memset(profile_gallery_peer_id, 0, sizeof(profile_gallery_peer_id));\n"
+    "    profile_gallery_peer_had_current_photo = false;\n"
+    "    profile_gallery_picture = NULL;",
+    1,
+)
+
+s = s.replace(
+    "    profile_gallery_peer = peer;\n"
+    "    profile_gallery_picture = picture;",
+    "    memcpy(profile_gallery_peer_id, peer->id, 8);\n"
+    "    profile_gallery_peer_had_current_photo = read_le(peer->photo, 8) != 0;\n"
+    "    profile_gallery_picture = picture;",
+    1,
+)
+
+s = s.replace(
+    "        profile_gallery_peer &&\n"
+    "        !read_le(profile_gallery_peer->photo, 8) &&\n"
+    "        !profile_gallery_photos.empty()",
+    "        !profile_gallery_peer_had_current_photo &&\n"
+    "        !profile_gallery_photos.empty()",
+    1,
+)
+
+s = s.replace(
+    "write_le(unenc_query + offset, 50, 4); // enough for a useful gallery",
+    "write_le(unenc_query + offset, 20, 4); // bounded profile gallery",
+    1,
+)
+
+# Prefer the available Telegram thumbnail closest to the actual 160x160 control
+# instead of falling back to the largest image.
+thumb_start = s.find("            int best_area = -1;")
+thumb_end_text = "            out->thumb_type = best_type ? best_type : 'm';"
+thumb_end = s.find(thumb_end_text, thumb_start)
+if thumb_start < 0 or thumb_end < 0:
+    raise SystemExit("Could not locate avatar thumbnail selection block.")
+thumb_end += len(thumb_end_text)
+
+thumb_replacement = r'''            int best_distance = 0x7fffffff;
+            char best_type = 0;
+
+            for (int i = 0; i < count && offset + 8 < total; i++) {
+                BYTE* size = photo + offset;
+                unsigned int size_constructor = (unsigned int)read_le(size, 4);
+                int size_len = photo_video_size_offset(size, true, false, false);
+                if (size_len <= 0 || offset + size_len > total)
+                    break;
+
+                char type = 0;
+                BYTE* type_string = size + 4;
+                if (type_string[0] == 1)
+                    type = (char)type_string[1];
+
+                int width = 0;
+                int height = 0;
+                int q = 4 + tlstr_len(type_string, true);
+
+                if (
+                    size_constructor == 0x75c78e60 ||
+                    size_constructor == 0x21e1ad6 ||
+                    size_constructor == 0xfa3efb95
+                ) {
+                    width = (int)read_le(size + q, 4);
+                    height = (int)read_le(size + q + 4, 4);
+                }
+
+                if (type) {
+                    if (width > 0 && height > 0) {
+                        int side = width > height ? width : height;
+                        int distance = side > 160 ? side - 160 : 160 - side;
+                        if (distance < best_distance) {
+                            best_distance = distance;
+                            best_type = type;
+                        }
+                    } else if (!best_type) {
+                        best_type = type;
+                    }
+                }
+
+                offset += size_len;
+            }
+
+            out->thumb_type = best_type ? best_type : 'm';'''
+
+s = s[:thumb_start] + thumb_replacement + s[thumb_end:]
+
+request_selected = r'''static bool profile_gallery_request_selected(DCInfo* dcInfo) {
+    if (
+        !profile_gallery_active ||
+        !dcInfo ||
+        profile_gallery_index < 0 ||
+        profile_gallery_index >= (int)profile_gallery_photos.size()
+    ) {
+        return false;
+    }
+
+    TelegacyProfileGalleryPhoto* photo =
+        &profile_gallery_photos[profile_gallery_index];
+
+    int ref_len = tlstr_len(photo->file_reference, true);
+    if (ref_len <= 0 || ref_len > 4096)
+        return false;
+
+    int raw_size = 60 + ref_len + 4 + 8 + 4;
+    int packet_size = raw_size + get_padding(raw_size);
+
+    BYTE* unenc_query = (BYTE*)malloc(packet_size);
+    BYTE* enc_query = (BYTE*)malloc(packet_size + 24);
+    if (!unenc_query || !enc_query) {
+        if (unenc_query) free(unenc_query);
+        if (enc_query) free(enc_query);
+        return false;
+    }
+
+    memset(unenc_query, 0, packet_size);
+    memset(enc_query, 0, packet_size + 24);
+
+    internal_header(dcInfo, unenc_query, true);
+    memcpy(profile_gallery_file_msgid, unenc_query + 16, 8);
+
+    write_le(unenc_query + 32, 0xbe5335be, 4);
+    write_le(unenc_query + 36, 0, 4);
+    write_le(unenc_query + 40, 0x40181ffe, 4);
+    memcpy(unenc_query + 44, photo->id, 8);
+    memcpy(unenc_query + 52, photo->access_hash, 8);
+    memcpy(unenc_query + 60, photo->file_reference, ref_len);
+
+    int offset = 60 + ref_len;
+    memset(unenc_query + offset, 0, 4);
+    unenc_query[offset] = 1;
+    unenc_query[offset + 1] = photo->thumb_type;
+    offset += 4;
+
+    memset(unenc_query + offset, 0, 8);
+    offset += 8;
+    write_le(unenc_query + offset, 1048576, 4);
+    offset += 4;
+
+    write_le(unenc_query + 28, offset - 32, 4);
+    int padding = get_padding(offset);
+    fortuna_read(unenc_query + offset, padding, &prng);
+    offset += padding;
+
+    convert_message(dcInfo, unenc_query, enc_query, offset, 0);
+    profile_gallery_loading = true;
+    profile_gallery_update_controls();
+    send_query(dcInfo, enc_query, offset + 24);
+
+    free(unenc_query);
+    free(enc_query);
+    return true;
+}'''
+s = replace_function(
+    s,
+    "static bool profile_gallery_request_selected(DCInfo* dcInfo)",
+    request_selected,
+)
+
+fit_insert = s.find("bool profile_gallery_handle_upload(")
+if fit_insert < 0:
+    raise SystemExit("Could not locate gallery upload handler.")
+
+fit_code = r'''
+HBITMAP profile_gallery_fit_bitmap(HBITMAP source) {
+    if (!source)
+        return NULL;
+
+    BITMAP bm = {0};
+    if (!GetObject(source, sizeof(bm), &bm))
+        return source;
+
+    int src_w = bm.bmWidth;
+    int src_h = bm.bmHeight < 0 ? -bm.bmHeight : bm.bmHeight;
+    if (src_w <= 0 || src_h <= 0)
+        return source;
+
+    const int dst_w = 160;
+    const int dst_h = 160;
+    if (src_w == dst_w && src_h == dst_h)
+        return source;
+
+    HDC screen = GetDC(NULL);
+    if (!screen)
+        return source;
+
+    HBITMAP fitted = CreateCompatibleBitmap(screen, dst_w, dst_h);
+    ReleaseDC(NULL, screen);
+    if (!fitted)
+        return source;
+
+    HDC src_dc = CreateCompatibleDC(NULL);
+    HDC dst_dc = CreateCompatibleDC(NULL);
+    if (!src_dc || !dst_dc) {
+        if (src_dc) DeleteDC(src_dc);
+        if (dst_dc) DeleteDC(dst_dc);
+        DeleteObject(fitted);
+        return source;
+    }
+
+    HGDIOBJ old_src = SelectObject(src_dc, source);
+    HGDIOBJ old_dst = SelectObject(dst_dc, fitted);
+
+    RECT rc = {0, 0, dst_w, dst_h};
+    FillRect(
+        dst_dc,
+        &rc,
+        hBrushes[1] ? hBrushes[1] : GetSysColorBrush(COLOR_WINDOW)
+    );
+
+    double sx = (double)dst_w / (double)src_w;
+    double sy = (double)dst_h / (double)src_h;
+    double scale = sx < sy ? sx : sy;
+
+    int draw_w = (int)(src_w * scale);
+    int draw_h = (int)(src_h * scale);
+    if (draw_w < 1) draw_w = 1;
+    if (draw_h < 1) draw_h = 1;
+
+    int draw_x = (dst_w - draw_w) / 2;
+    int draw_y = (dst_h - draw_h) / 2;
+
+    SetStretchBltMode(dst_dc, HALFTONE);
+    SetBrushOrgEx(dst_dc, 0, 0, NULL);
+    StretchBlt(
+        dst_dc,
+        draw_x, draw_y, draw_w, draw_h,
+        src_dc,
+        0, 0, src_w, src_h,
+        SRCCOPY
+    );
+
+    SelectObject(src_dc, old_src);
+    SelectObject(dst_dc, old_dst);
+    DeleteDC(src_dc);
+    DeleteDC(dst_dc);
+
+    return fitted;
+}
+
+'''
+s = s[:fit_insert] + fit_code + s[fit_insert:]
+
+old_bitmap = r'''    HBITMAP bitmap = jpg_to_bmp(response + 12 + header, bytes_len);
+    if (bitmap) {
+        HBITMAP old = (HBITMAP)SendMessageW(
+            profile_gallery_picture,
+            STM_SETIMAGE,
+            IMAGE_BITMAP,
+            (LPARAM)bitmap
+        );
+
+        if (old && old != bitmap)
+            DeleteObject(old);
+    }
+
+    profile_gallery_update_controls();'''
+
+new_bitmap = r'''    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);
+    if (decoded) {
+        HBITMAP bitmap = profile_gallery_fit_bitmap(decoded);
+        if (bitmap != decoded)
+            DeleteObject(decoded);
+
+        HBITMAP old = (HBITMAP)SendMessageW(
+            profile_gallery_picture,
+            STM_SETIMAGE,
+            IMAGE_BITMAP,
+            (LPARAM)bitmap
+        );
+
+        SetWindowPos(
+            profile_gallery_picture,
+            NULL,
+            10, 10, 160, 160,
+            SWP_NOZORDER | SWP_NOACTIVATE
+        );
+
+        if (old && old != bitmap)
+            DeleteObject(old);
+    }
+
+    profile_gallery_update_controls();'''
+
+if old_bitmap not in s:
+    raise SystemExit("Could not locate historical avatar bitmap assignment.")
+s = s.replace(old_bitmap, new_bitmap, 1)
+
+# Use a real messages.getDialogs limit instead of zero. The previous zero-limit
+# path returned about 20 dialogs per request and triggered FLOOD_WAIT on large
+# accounts.
+gd_start, gd_end = function_range(s, "void get_dialogs()")
+gd = s[gd_start:gd_end]
+gd_old = "\tmemset(unenc_query + 52, 0, 12);"
+gd_new = (
+    "\twrite_le(unenc_query + 52, LATVIANGHOST_DIALOGS_PAGE_SIZE, 4);\n"
+    "\tmemset(unenc_query + 56, 0, 8);"
+)
+if gd_old not in gd:
+    raise SystemExit("Could not locate messages.getDialogs limit/hash fields.")
+gd = gd.replace(gd_old, gd_new, 1)
+s = s[:gd_start] + gd + s[gd_end:]
+
+write(helpers, s)
+
+# ---------------------------------------------------------------------------
+# procs.cpp: do not retain a transient member pointer in a user profile, and
+# prefer stable global Peer objects for nickname navigation.
+# ---------------------------------------------------------------------------
+s = read(p)
+
+s = s.replace(
+    "\t\tprofile_dialog_peer = peer;",
+    "\t\tprofile_dialog_peer = (peer && peer->type == 1) ? peer : NULL;",
+    1,
+)
+
+safe_find_peer = r'''static Peer* profile_nav_find_peer(
+    const BYTE* peer_id,
+    char peer_type
+) {
+    if (!peer_id)
+        return NULL;
+
+    if (peer_type == 0 && memcmp(myself.id, peer_id, 8) == 0)
+        return &myself;
+
+    for (int i = 0; i < peers_count; i++) {
+        if (
+            peers[i].type == peer_type &&
+            memcmp(peers[i].id, peer_id, 8) == 0
+        ) {
+            return &peers[i];
+        }
+    }
+
+    if (
+        current_peer &&
+        current_peer->type == 1 &&
+        current_peer->chat_users
+    ) {
+        for (int i = 0; i < (int)current_peer->chat_users->size(); i++) {
+            Peer* candidate = &current_peer->chat_users->at(i);
+            if (
+                candidate->type == peer_type &&
+                memcmp(candidate->id, peer_id, 8) == 0
+            ) {
+                return candidate;
+            }
+        }
+    }
+
+    if (
+        current_peer &&
+        current_peer->type == peer_type &&
+        memcmp(current_peer->id, peer_id, 8) == 0
+    ) {
+        return current_peer;
+    }
+
+    return NULL;
+}'''
+
+s = replace_function(
+    s,
+    "static Peer* profile_nav_find_peer(",
+    safe_find_peer,
+)
+
+write(p, s)
+
+# ---------------------------------------------------------------------------
+# telegacy.cpp: undo the unsafe variable-height combo introduced by the Links
+# patch. Fixed item heights keep scrolling stable and do not hide chats whose
+# names are still being resolved.
+# ---------------------------------------------------------------------------
+s = read(t)
+
+combo_start = s.find("hComboBoxChats = CreateWindow(")
+if combo_start < 0:
+    raise SystemExit("Could not locate chat combobox creation.")
+combo_end = s.find(");", combo_start)
+if combo_end < 0:
+    raise SystemExit("Could not locate chat combobox creation terminator.")
+
+combo_fragment = s[combo_start:combo_end]
+if "CBS_OWNERDRAWVARIABLE" in combo_fragment:
+    combo_fragment = combo_fragment.replace(
+        "CBS_OWNERDRAWVARIABLE",
+        "CBS_OWNERDRAWFIXED",
+        1,
+    )
+elif "CBS_OWNERDRAWFIXED" not in combo_fragment:
+    raise SystemExit("Unexpected chat combobox owner-draw style.")
+
+s = s[:combo_start] + combo_fragment + s[combo_end:]
+
+unsafe_dropdown = '''if (HIWORD(wParam) == CBN_DROPDOWN) {
+                telegacy_hide_phantom_chat_rows();
+                if (nt3)
+                    nt3_combobox_fit(hComboBoxChats);
+            }'''
+
+if unsafe_dropdown in s:
+    s = s.replace(
+        unsafe_dropdown,
+        "if (nt3 && HIWORD(wParam) == CBN_DROPDOWN) nt3_combobox_fit(hComboBoxChats);",
+        1,
+    )
+else:
+    s = s.replace(
+        "                telegacy_hide_phantom_chat_rows();\n",
+        "",
+        1,
+    )
+
+write(t, s)
+
+# ---------------------------------------------------------------------------
+# response.cpp: preserve combo viewport as dialog pages arrive and always fit
+# the legacy/current avatar into the original 160x160 profile box.
+# ---------------------------------------------------------------------------
+s = read(r)
+
+combo_add_anchor = '''\t\tfor (i = peers_count_old; i < peers_count; i++) {
+\t\t\tSendMessage(hComboBoxChats, CB_ADDSTRING, 0, (LPARAM)peers[folders[0].peers[i]].name);
+\t\t\tSendMessage(hComboBoxChats, CB_SETITEMDATA, i, (LPARAM)&peers[folders[0].peers[i]]);
+\t\t}'''
+
+combo_add_replacement = '''\t\tint lg_combo_top = (int)SendMessage(hComboBoxChats, CB_GETTOPINDEX, 0, 0);
+\t\tBOOL lg_combo_dropped = (BOOL)SendMessage(hComboBoxChats, CB_GETDROPPEDSTATE, 0, 0);
+\t\tSendMessage(hComboBoxChats, WM_SETREDRAW, FALSE, 0);
+\t\tfor (i = peers_count_old; i < peers_count; i++) {
+\t\t\tSendMessage(hComboBoxChats, CB_ADDSTRING, 0, (LPARAM)peers[folders[0].peers[i]].name);
+\t\t\tSendMessage(hComboBoxChats, CB_SETITEMDATA, i, (LPARAM)&peers[folders[0].peers[i]]);
+\t\t}
+\t\tif (lg_combo_dropped && lg_combo_top != CB_ERR)
+\t\t\tSendMessage(hComboBoxChats, CB_SETTOPINDEX, lg_combo_top, 0);
+\t\tSendMessage(hComboBoxChats, WM_SETREDRAW, TRUE, 0);
+\t\tInvalidateRect(hComboBoxChats, NULL, FALSE);'''
+
+if combo_add_anchor not in s:
+    raise SystemExit("Could not locate chat combo append loop.")
+s = s.replace(combo_add_anchor, combo_add_replacement, 1)
+
+pfp_old = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {
+\t\t\tif (profile_gallery_showing_current() && dlgPic && IsWindow(dlgPic)) {
+\t\t\t\tint bytes_len = tlstr_len(unenc_response + 12, false);
+\t\t\t\tint bytes_header = bytes_len >= 254 ? 4 : 1;
+\t\t\t\tHBITMAP hBmp = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);
+\t\t\t\tif (hBmp) {
+\t\t\t\t\tHBITMAP oldBmp = (HBITMAP)SendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+\t\t\t\t\tif (oldBmp && oldBmp != hBmp) DeleteObject(oldBmp);
+\t\t\t\t}
+\t\t\t}
+\t\t\tbreak;
+\t\t}'''
+
+pfp_new = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {
+\t\t\tif (profile_gallery_showing_current() && dlgPic && IsWindow(dlgPic)) {
+\t\t\t\tint bytes_len = tlstr_len(unenc_response + 12, false);
+\t\t\t\tint bytes_header = bytes_len >= 254 ? 4 : 1;
+\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);
+\t\t\t\tif (decoded) {
+\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);
+\t\t\t\t\tif (hBmp != decoded) DeleteObject(decoded);
+\t\t\t\t\tHBITMAP oldBmp = (HBITMAP)SendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+\t\t\t\t\tSetWindowPos(dlgPic, NULL, 10, 10, 160, 160, SWP_NOZORDER | SWP_NOACTIVATE);
+\t\t\t\t\tif (oldBmp && oldBmp != hBmp) DeleteObject(oldBmp);
+\t\t\t\t}
+\t\t\t}
+\t\t\tbreak;
+\t\t}'''
+
+if pfp_old not in s:
+    raise SystemExit("Could not locate current-avatar response block.")
+s = s.replace(pfp_old, pfp_new, 1)
+
+write(r, s)
+
+# ---------------------------------------------------------------------------
+# v2 verification
+# ---------------------------------------------------------------------------
+checks_v2 = {
+    h: [
+        "profile_navigation_latvianghost_v2",
+        "LATVIANGHOST_DIALOGS_PAGE_SIZE",
+        "profile_gallery_fit_bitmap",
+    ],
+    helpers: [
+        "profile_gallery_peer_had_current_photo",
+        "profile_gallery_fit_bitmap",
+        "LATVIANGHOST_DIALOGS_PAGE_SIZE",
+        "packet_size = raw_size + get_padding(raw_size)",
+    ],
+    p: [
+        "profile_dialog_peer = (peer && peer->type == 1) ? peer : NULL",
+        "static Peer* profile_nav_find_peer",
+    ],
+    t: [
+        "CBS_OWNERDRAWFIXED",
+    ],
+    r: [
+        "CB_GETTOPINDEX",
+        "profile_gallery_fit_bitmap(decoded)",
+        "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160",
+    ],
+}
+
+for path, tokens in checks_v2.items():
+    text = read(path)
+    for token in tokens:
+        if token not in text:
+            raise SystemExit(
+                f"Profile navigation v2 verification failed in {path.name}: {token}"
+            )
+
 print(
-    "Applied LatvianGhost profile navigation: clickable message senders, "
-    "basic-group participant list, member profiles, and user avatar gallery."
+    "Applied LatvianGhost profile navigation v2: clickable nicknames, "
+    "participant profiles, bounded avatar gallery, stable chat scrolling, "
+    "and larger dialog batches."
 )
