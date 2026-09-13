@@ -3529,3 +3529,1561 @@ print(
     "Applied Media A/V v3: atomic no-flicker page swaps, full-size photo open, "
     "video previews in Media/chat, and visible inline audio player with progress."
 )
+
+
+# =============================================================================
+# Media A/V v4
+# - reliable MFPlay video seeking (deferred commit + anti-snapback window)
+# - real graphical inline audio player embedded in the RichEdit stream
+# - clickable/draggable seek and volume controls directly in chat
+# =============================================================================
+
+p = root / "src" / "procs.cpp"
+if not p.exists():
+    raise SystemExit(f"Missing expected Telegacy file: {p}")
+
+# -----------------------------------------------------------------------------
+# telegacy.h: cross-file declarations used by message.cpp and procs.cpp
+# -----------------------------------------------------------------------------
+s = read(h)
+
+if "media_tabs_av_v4" not in s:
+    anchor = "bool media_inline_audio_toggle(const wchar_t* path);"
+    if anchor not in s:
+        raise SystemExit("Could not locate inline-audio declaration for v4.")
+
+    s = s.replace(
+        anchor,
+        anchor
+        + "\nHBITMAP media_inline_audio_make_bitmap(int duration_seconds, LONGLONG position_100ns, bool playing, int volume);"
+        + "\nbool media_inline_audio_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);"
+        + "\n// media_tabs_av_v4",
+        1,
+    )
+
+write(h, s)
+
+
+# -----------------------------------------------------------------------------
+# telegacy.cpp: seek fix + graphical inline player implementation
+# -----------------------------------------------------------------------------
+s = read(t)
+
+if "media_tabs_av_runtime_v4" not in s:
+    global_anchor = "static wchar_t media_inline_audio_path[MAX_PATH] = {0};"
+    if global_anchor not in s:
+        raise SystemExit("Could not locate Media v2 inline-audio globals for v4.")
+
+    s = s.replace(
+        global_anchor,
+        global_anchor
+        + r'''
+
+// media_tabs_av_runtime_v4
+static DWORD media_player_seek_hold_until = 0;
+static int media_inline_audio_volume = 85;
+static int media_inline_audio_drag_mode = 0; // 1 seek, 2 volume
+static int media_inline_audio_drag_document = -1;
+''',
+        1,
+    )
+
+    # -------------------------------------------------------------------------
+    # Video seek: MFPlay seeking is asynchronous.  The old code immediately
+    # asked GetPosition() again and snapped the slider back to the old position.
+    # Pause -> SetPosition -> resume, then suppress timer-driven thumb updates
+    # briefly while MFPlay commits the asynchronous seek.
+    # -------------------------------------------------------------------------
+    seek_v4 = r'''static void media_player_set_position_v2(LONGLONG target) {
+    if (target < 0)
+        target = 0;
+
+    if (media_player_backend == 1 && media_player_mf) {
+        MFP_MEDIAPLAYER_STATE state =
+            MFP_MEDIAPLAYER_STATE_EMPTY;
+
+        media_player_mf->GetState(&state);
+
+        bool resume =
+            state == MFP_MEDIAPLAYER_STATE_PLAYING;
+
+        if (resume)
+            media_player_mf->Pause();
+
+        PROPVARIANT value = {0};
+        value.vt = VT_I8;
+        value.hVal.QuadPart = target;
+
+        HRESULT hr =
+            media_player_mf->SetPosition(
+                MFP_POSITIONTYPE_100NS,
+                &value
+            );
+
+        media_player_seek_hold_until =
+            GetTickCount() + 900;
+
+        diag_log(
+            "media player seek target=%I64d hr=0x%08X resume=%d",
+            target,
+            (unsigned int)hr,
+            resume ? 1 : 0
+        );
+
+        if (resume && SUCCEEDED(hr))
+            media_player_mf->Play();
+
+        return;
+    }
+
+    if (media_player_backend == 2 && media_player_seeking) {
+        HRESULT hr =
+            media_player_seeking->SetPositions(
+                &target,
+                AM_SEEKING_AbsolutePositioning,
+                NULL,
+                AM_SEEKING_NoPositioning
+            );
+
+        media_player_seek_hold_until =
+            GetTickCount() + 450;
+
+        diag_log(
+            "media player DirectShow seek target=%I64d hr=0x%08X",
+            target,
+            (unsigned int)hr
+        );
+    }
+}'''
+    s = replace_function(s, "static void media_player_set_position_v2(", seek_v4)
+
+    update_v4 = r'''static void media_player_update_controls() {
+    if (!hMediaPlayerSeek)
+        return;
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+
+    if (!media_player_get_time(&position, &duration))
+        return;
+
+    bool seek_hold =
+        media_player_seek_hold_until != 0 &&
+        (LONG)(GetTickCount() - media_player_seek_hold_until) < 0;
+
+    if (!media_player_user_seeking && !seek_hold) {
+        int slider =
+            (int)(
+                position * 1000LL /
+                duration
+            );
+
+        SendMessageW(
+            hMediaPlayerSeek,
+            TBM_SETPOS,
+            TRUE,
+            slider
+        );
+    }
+
+    if (hMediaPlayerTime) {
+        wchar_t now_text[32] = {0};
+        wchar_t total_text[32] = {0};
+        wchar_t combined[80] = {0};
+
+        media_player_format_time(
+            position,
+            now_text,
+            ARRAYSIZE(now_text)
+        );
+
+        media_player_format_time(
+            duration,
+            total_text,
+            ARRAYSIZE(total_text)
+        );
+
+        _snwprintf(
+            combined,
+            ARRAYSIZE(combined) - 1,
+            L"%s / %s",
+            now_text,
+            total_text
+        );
+        combined[ARRAYSIZE(combined) - 1] = 0;
+
+        SetWindowTextW(
+            hMediaPlayerTime,
+            combined
+        );
+    }
+}'''
+    s = replace_function(s, "static void media_player_update_controls()", update_v4)
+
+    # Replace only the seek branch inside the existing player window proc.
+    proc_start, proc_end = function_range(
+        s,
+        "static LRESULT CALLBACK TelegacyMediaPlayerWindow("
+    )
+    proc = s[proc_start:proc_end]
+
+    old_seek_branch = r'''            if (source == hMediaPlayerSeek) {
+                int code = LOWORD(wParam);
+                if (code == TB_THUMBTRACK || code == TB_THUMBPOSITION || code == TB_ENDTRACK) {
+                    media_player_user_seeking = true;
+
+                    int slider = (int)SendMessageW(hMediaPlayerSeek, TBM_GETPOS, 0, 0);
+                    LONGLONG position = 0;
+                    LONGLONG duration = 0;
+
+                    if (media_player_get_time(&position, &duration))
+                        media_player_set_position_v2(duration * slider / 1000LL);
+
+                    if (code == TB_ENDTRACK || code == TB_THUMBPOSITION)
+                        media_player_user_seeking = false;
+
+                    media_player_update_controls();
+                }
+                return 0;
+            }'''
+
+    new_seek_branch = r'''            if (source == hMediaPlayerSeek) {
+                int code = LOWORD(wParam);
+                int slider =
+                    (int)SendMessageW(
+                        hMediaPlayerSeek,
+                        TBM_GETPOS,
+                        0,
+                        0
+                    );
+
+                LONGLONG position = 0;
+                LONGLONG duration = 0;
+
+                if (code == TB_THUMBTRACK) {
+                    // While dragging, leave playback alone.  This prevents a
+                    // flood of asynchronous MFPlay SetPosition calls.
+                    media_player_user_seeking = true;
+
+                    if (
+                        media_player_get_time(
+                            &position,
+                            &duration
+                        ) &&
+                        duration > 0 &&
+                        hMediaPlayerTime
+                    ) {
+                        LONGLONG preview =
+                            duration *
+                            slider /
+                            1000LL;
+
+                        wchar_t now_text[32] = {0};
+                        wchar_t total_text[32] = {0};
+                        wchar_t combined[80] = {0};
+
+                        media_player_format_time(
+                            preview,
+                            now_text,
+                            ARRAYSIZE(now_text)
+                        );
+
+                        media_player_format_time(
+                            duration,
+                            total_text,
+                            ARRAYSIZE(total_text)
+                        );
+
+                        _snwprintf(
+                            combined,
+                            ARRAYSIZE(combined) - 1,
+                            L"%s / %s",
+                            now_text,
+                            total_text
+                        );
+
+                        SetWindowTextW(
+                            hMediaPlayerTime,
+                            combined
+                        );
+                    }
+
+                    return 0;
+                }
+
+                if (
+                    code == TB_THUMBPOSITION ||
+                    code == TB_ENDTRACK ||
+                    code == TB_LINEUP ||
+                    code == TB_LINEDOWN ||
+                    code == TB_PAGEUP ||
+                    code == TB_PAGEDOWN
+                ) {
+                    media_player_user_seeking = true;
+
+                    if (
+                        media_player_get_time(
+                            &position,
+                            &duration
+                        ) &&
+                        duration > 0
+                    ) {
+                        media_player_set_position_v2(
+                            duration *
+                            slider /
+                            1000LL
+                        );
+                    }
+
+                    media_player_user_seeking = false;
+                    return 0;
+                }
+
+                return 0;
+            }'''
+
+    if old_seek_branch not in proc:
+        raise SystemExit("Could not locate Media player seek WM_HSCROLL branch for v4.")
+
+    proc = proc.replace(
+        old_seek_branch,
+        new_seek_branch,
+        1,
+    )
+
+    s = s[:proc_start] + proc + s[proc_end:]
+
+    # -------------------------------------------------------------------------
+    # Graphical inline audio player. It is an actual bitmap/OLE object inside
+    # RichEdit, so it scrolls naturally with the message and remains visually
+    # part of the chat. Mouse hit-testing is done against that object.
+    # -------------------------------------------------------------------------
+    visual_signature = "static void media_inline_audio_apply_visual(\n    bool force\n) {"
+    visual_pos = s.find(visual_signature)
+    if visual_pos < 0:
+        raise SystemExit("Could not locate v3 inline audio visual function.")
+
+    graphical_helpers = r'''
+static void media_player_queue_chat_autoplay(const wchar_t* path);
+
+HBITMAP media_inline_audio_make_bitmap(
+    int duration_seconds,
+    LONGLONG position_100ns,
+    bool playing,
+    int volume
+) {
+    const int width = 330;
+    const int height = 54;
+
+    if (duration_seconds < 0)
+        duration_seconds = 0;
+
+    if (volume < 0)
+        volume = 0;
+    if (volume > 100)
+        volume = 100;
+
+    LONGLONG total_100ns =
+        (LONGLONG)duration_seconds *
+        10000000LL;
+
+    if (position_100ns < 0)
+        position_100ns = 0;
+    if (
+        total_100ns > 0 &&
+        position_100ns > total_100ns
+    ) {
+        position_100ns = total_100ns;
+    }
+
+    HWND owner =
+        chat
+            ? chat
+            : hMain;
+
+    HDC screen =
+        GetDC(owner);
+
+    if (!screen)
+        return NULL;
+
+    HBITMAP bitmap =
+        CreateCompatibleBitmap(
+            screen,
+            width,
+            height
+        );
+
+    HDC dc =
+        CreateCompatibleDC(screen);
+
+    ReleaseDC(owner, screen);
+
+    if (!bitmap || !dc) {
+        if (bitmap)
+            DeleteObject(bitmap);
+        if (dc)
+            DeleteDC(dc);
+        return NULL;
+    }
+
+    HGDIOBJ old_bitmap =
+        SelectObject(dc, bitmap);
+
+    RECT outer = {
+        0,
+        0,
+        width,
+        height
+    };
+
+    FillRect(
+        dc,
+        &outer,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+
+    DrawEdge(
+        dc,
+        &outer,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    RECT play = {
+        7,
+        10,
+        41,
+        44
+    };
+
+    FillRect(
+        dc,
+        &play,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+
+    DrawEdge(
+        dc,
+        &play,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    COLORREF glyph_color =
+        GetSysColor(COLOR_BTNTEXT);
+
+    HBRUSH glyph_brush =
+        CreateSolidBrush(glyph_color);
+
+    HPEN glyph_pen =
+        CreatePen(
+            PS_SOLID,
+            1,
+            glyph_color
+        );
+
+    HGDIOBJ old_brush =
+        SelectObject(dc, glyph_brush);
+
+    HGDIOBJ old_pen =
+        SelectObject(dc, glyph_pen);
+
+    if (playing) {
+        Rectangle(dc, 17, 17, 22, 37);
+        Rectangle(dc, 27, 17, 32, 37);
+    } else {
+        POINT triangle[3] = {
+            {18, 16},
+            {18, 38},
+            {33, 27}
+        };
+
+        Polygon(
+            dc,
+            triangle,
+            3
+        );
+    }
+
+    SelectObject(dc, old_pen);
+    SelectObject(dc, old_brush);
+    DeleteObject(glyph_pen);
+    DeleteObject(glyph_brush);
+
+    // Seek track.
+    RECT seek_track = {
+        53,
+        12,
+        228,
+        22
+    };
+
+    FillRect(
+        dc,
+        &seek_track,
+        GetSysColorBrush(COLOR_WINDOW)
+    );
+
+    DrawEdge(
+        dc,
+        &seek_track,
+        EDGE_SUNKEN,
+        BF_RECT
+    );
+
+    int seek_x = seek_track.left + 3;
+
+    if (total_100ns > 0) {
+        seek_x +=
+            (int)(
+                position_100ns *
+                (seek_track.right - seek_track.left - 7) /
+                total_100ns
+            );
+    }
+
+    RECT seek_thumb = {
+        seek_x,
+        seek_track.top - 3,
+        seek_x + 7,
+        seek_track.bottom + 3
+    };
+
+    FillRect(
+        dc,
+        &seek_thumb,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+
+    DrawEdge(
+        dc,
+        &seek_thumb,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    // Volume track.
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(
+        dc,
+        GetSysColor(COLOR_BTNTEXT)
+    );
+
+    HFONT font =
+        (HFONT)GetStockObject(
+            DEFAULT_GUI_FONT
+        );
+
+    HGDIOBJ old_font =
+        SelectObject(dc, font);
+
+    TextOutW(
+        dc,
+        238,
+        10,
+        L"Vol",
+        3
+    );
+
+    RECT volume_track = {
+        266,
+        12,
+        319,
+        22
+    };
+
+    FillRect(
+        dc,
+        &volume_track,
+        GetSysColorBrush(COLOR_WINDOW)
+    );
+
+    DrawEdge(
+        dc,
+        &volume_track,
+        EDGE_SUNKEN,
+        BF_RECT
+    );
+
+    int volume_x =
+        volume_track.left + 3 +
+        volume *
+        (volume_track.right - volume_track.left - 7) /
+        100;
+
+    RECT volume_thumb = {
+        volume_x,
+        volume_track.top - 3,
+        volume_x + 7,
+        volume_track.bottom + 3
+    };
+
+    FillRect(
+        dc,
+        &volume_thumb,
+        GetSysColorBrush(COLOR_BTNFACE)
+    );
+
+    DrawEdge(
+        dc,
+        &volume_thumb,
+        EDGE_RAISED,
+        BF_RECT
+    );
+
+    int current_seconds =
+        (int)(
+            position_100ns /
+            10000000LL
+        );
+
+    wchar_t time_text[64] = {0};
+
+    _snwprintf(
+        time_text,
+        ARRAYSIZE(time_text) - 1,
+        L"%02d:%02d / %02d:%02d",
+        current_seconds / 60,
+        current_seconds % 60,
+        duration_seconds / 60,
+        duration_seconds % 60
+    );
+
+    TextOutW(
+        dc,
+        53,
+        31,
+        time_text,
+        (int)wcslen(time_text)
+    );
+
+    SelectObject(dc, old_font);
+    SelectObject(dc, old_bitmap);
+    DeleteDC(dc);
+
+    return bitmap;
+}
+
+static bool media_inline_audio_replace_bitmap(
+    int document_index,
+    LONGLONG position,
+    LONGLONG duration,
+    bool playing
+) {
+    if (
+        !chat ||
+        document_index < 0 ||
+        document_index >=
+            (int)documents.size()
+    ) {
+        return false;
+    }
+
+    Document* document =
+        &documents[document_index];
+
+    if (
+        !document->filename ||
+        !media_player_is_music_path(
+            document->filename
+        ) ||
+        document->max <=
+            document->min
+    ) {
+        return false;
+    }
+
+    int object_pos =
+        document->max - 1;
+
+    int text_length =
+        (int)SendMessageW(
+            chat,
+            WM_GETTEXTLENGTH,
+            0,
+            0
+        );
+
+    if (
+        object_pos < 0 ||
+        object_pos >= text_length
+    ) {
+        return false;
+    }
+
+    int duration_seconds =
+        duration > 0
+            ? (int)(
+                duration /
+                10000000LL
+            )
+            : 0;
+
+    HBITMAP bitmap =
+        media_inline_audio_make_bitmap(
+            duration_seconds,
+            position,
+            playing,
+            media_inline_audio_volume
+        );
+
+    if (!bitmap)
+        return false;
+
+    CHARRANGE saved = {0};
+    SendMessageW(
+        chat,
+        EM_EXGETSEL,
+        0,
+        (LPARAM)&saved
+    );
+
+    SendMessageW(
+        chat,
+        WM_SETREDRAW,
+        FALSE,
+        0
+    );
+
+    SendMessageW(
+        chat,
+        EM_SETSEL,
+        object_pos,
+        object_pos + 1
+    );
+
+    SendMessageW(
+        chat,
+        EM_REPLACESEL,
+        FALSE,
+        (LPARAM)L""
+    );
+
+    insert_image(
+        chat,
+        NULL,
+        bitmap
+    );
+
+    DeleteObject(bitmap);
+
+    SendMessageW(
+        chat,
+        EM_EXSETSEL,
+        0,
+        (LPARAM)&saved
+    );
+
+    SendMessageW(
+        chat,
+        WM_SETREDRAW,
+        TRUE,
+        0
+    );
+
+    POINTL point = {0};
+    SendMessageW(
+        chat,
+        EM_POSFROMCHAR,
+        (WPARAM)&point,
+        object_pos
+    );
+
+    RECT player_rect = {
+        point.x,
+        point.y,
+        point.x + 330,
+        point.y + 54
+    };
+
+    InvalidateRect(
+        chat,
+        &player_rect,
+        FALSE
+    );
+
+    return true;
+}
+
+static bool media_inline_audio_file_ready(
+    Document* document
+) {
+    if (
+        !document ||
+        !document->filename
+    ) {
+        return false;
+    }
+
+    FILE* f =
+        _wfopen(
+            document->filename,
+            L"rb"
+        );
+
+    if (!f)
+        return false;
+
+    _fseeki64(f, 0, SEEK_END);
+    __int64 size = _ftelli64(f);
+    fclose(f);
+
+    return
+        document->size <= 0 ||
+        size == document->size;
+}
+
+static bool media_inline_audio_begin_or_toggle(
+    int document_index
+) {
+    if (
+        document_index < 0 ||
+        document_index >=
+            (int)documents.size()
+    ) {
+        return false;
+    }
+
+    Document* document =
+        &documents[document_index];
+
+    if (
+        !document->filename ||
+        !media_player_is_music_path(
+            document->filename
+        )
+    ) {
+        return false;
+    }
+
+    if (media_inline_audio_file_ready(document)) {
+        bool result =
+            media_inline_audio_toggle(
+                document->filename
+            );
+
+        return result;
+    }
+
+    media_player_queue_chat_autoplay(
+        document->filename
+    );
+
+    for (
+        int i = 0;
+        i < (int)downloading_docs.size();
+        i++
+    ) {
+        if (
+            memcmp(
+                document->id,
+                downloading_docs[i].id,
+                8
+            ) == 0
+        ) {
+            return true;
+        }
+    }
+
+    DeleteFileW(
+        document->filename
+    );
+
+    Document copy =
+        *document;
+
+    copy.filename =
+        _wcsdup(
+            document->filename
+        );
+
+    int file_ref_len =
+        document->file_reference
+            ? tlstr_len(
+                document->file_reference,
+                true
+            )
+            : 0;
+
+    copy.file_reference = NULL;
+
+    if (file_ref_len > 0) {
+        copy.file_reference =
+            (BYTE*)malloc(
+                file_ref_len
+            );
+
+        if (copy.file_reference) {
+            memcpy(
+                copy.file_reference,
+                document->file_reference,
+                file_ref_len
+            );
+        }
+    }
+
+    if (
+        !copy.filename ||
+        (
+            file_ref_len > 0 &&
+            !copy.file_reference
+        )
+    ) {
+        free(copy.filename);
+        free(copy.file_reference);
+        return false;
+    }
+
+    downloading_docs.push_back(copy);
+
+    download_file(
+        &dcInfoMain,
+        &downloading_docs.back()
+    );
+
+    return true;
+}
+
+static bool media_inline_audio_get_player_rect(
+    int document_index,
+    RECT* rect
+) {
+    if (
+        !chat ||
+        !rect ||
+        document_index < 0 ||
+        document_index >=
+            (int)documents.size()
+    ) {
+        return false;
+    }
+
+    Document* document =
+        &documents[document_index];
+
+    if (
+        !document->filename ||
+        !media_player_is_music_path(
+            document->filename
+        ) ||
+        document->max <=
+            document->min
+    ) {
+        return false;
+    }
+
+    int object_pos =
+        document->max - 1;
+
+    POINTL point = {0};
+
+    SendMessageW(
+        chat,
+        EM_POSFROMCHAR,
+        (WPARAM)&point,
+        object_pos
+    );
+
+    rect->left = point.x;
+    rect->top = point.y;
+    rect->right = point.x + 330;
+    rect->bottom = point.y + 54;
+
+    return true;
+}
+
+static void media_inline_audio_set_seek_from_x(
+    int document_index,
+    int x
+) {
+    if (
+        !media_inline_audio ||
+        document_index < 0 ||
+        document_index >=
+            (int)documents.size()
+    ) {
+        return;
+    }
+
+    Document* document =
+        &documents[document_index];
+
+    if (
+        !document->filename ||
+        _wcsicmp(
+            document->filename,
+            media_inline_audio_path
+        ) != 0
+    ) {
+        return;
+    }
+
+    PROPVARIANT duration_value = {0};
+
+    if (
+        FAILED(
+            media_inline_audio->GetDuration(
+                MFP_POSITIONTYPE_100NS,
+                &duration_value
+            )
+        ) ||
+        duration_value.vt != VT_I8 ||
+        duration_value.hVal.QuadPart <= 0
+    ) {
+        return;
+    }
+
+    int relative = x - 53;
+    if (relative < 0)
+        relative = 0;
+    if (relative > 175)
+        relative = 175;
+
+    LONGLONG target =
+        duration_value.hVal.QuadPart *
+        relative /
+        175LL;
+
+    PROPVARIANT value = {0};
+    value.vt = VT_I8;
+    value.hVal.QuadPart = target;
+
+    HRESULT hr =
+        media_inline_audio->SetPosition(
+            MFP_POSITIONTYPE_100NS,
+            &value
+        );
+
+    diag_log(
+        "inline audio seek target=%I64d hr=0x%08X",
+        target,
+        (unsigned int)hr
+    );
+
+    media_inline_audio_last_second = -1;
+    media_inline_audio_apply_visual(true);
+}
+
+static void media_inline_audio_set_volume_from_x(
+    int document_index,
+    int x
+) {
+    int relative = x - 266;
+    if (relative < 0)
+        relative = 0;
+    if (relative > 53)
+        relative = 53;
+
+    media_inline_audio_volume =
+        relative *
+        100 /
+        53;
+
+    if (media_inline_audio) {
+        media_inline_audio->SetVolume(
+            (float)media_inline_audio_volume /
+            100.0f
+        );
+    }
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+    bool playing = false;
+
+    if (
+        media_inline_audio &&
+        document_index >= 0 &&
+        document_index <
+            (int)documents.size() &&
+        documents[document_index].filename &&
+        _wcsicmp(
+            documents[document_index].filename,
+            media_inline_audio_path
+        ) == 0
+    ) {
+        PROPVARIANT p = {0};
+        PROPVARIANT d = {0};
+        MFP_MEDIAPLAYER_STATE state =
+            MFP_MEDIAPLAYER_STATE_EMPTY;
+
+        media_inline_audio->GetState(&state);
+        playing =
+            state ==
+            MFP_MEDIAPLAYER_STATE_PLAYING;
+
+        if (
+            SUCCEEDED(
+                media_inline_audio->GetPosition(
+                    MFP_POSITIONTYPE_100NS,
+                    &p
+                )
+            ) &&
+            p.vt == VT_I8
+        ) {
+            position = p.hVal.QuadPart;
+        }
+
+        if (
+            SUCCEEDED(
+                media_inline_audio->GetDuration(
+                    MFP_POSITIONTYPE_100NS,
+                    &d
+                )
+            ) &&
+            d.vt == VT_I8
+        ) {
+            duration = d.hVal.QuadPart;
+        }
+    }
+
+    media_inline_audio_replace_bitmap(
+        document_index,
+        position,
+        duration,
+        playing
+    );
+}
+
+bool media_inline_audio_handle_chat_mouse(
+    HWND hWnd,
+    UINT msg,
+    WPARAM wParam,
+    LPARAM lParam
+) {
+    if (!chat || hWnd != chat)
+        return false;
+
+    POINT point = {
+        GET_X_LPARAM(lParam),
+        GET_Y_LPARAM(lParam)
+    };
+
+    if (
+        msg == WM_MOUSEMOVE &&
+        media_inline_audio_drag_mode != 0 &&
+        media_inline_audio_drag_document >= 0
+    ) {
+        RECT player = {0};
+
+        if (
+            !media_inline_audio_get_player_rect(
+                media_inline_audio_drag_document,
+                &player
+            )
+        ) {
+            return false;
+        }
+
+        int relative_x =
+            point.x -
+            player.left;
+
+        if (media_inline_audio_drag_mode == 1) {
+            media_inline_audio_set_seek_from_x(
+                media_inline_audio_drag_document,
+                relative_x
+            );
+        } else if (
+            media_inline_audio_drag_mode == 2
+        ) {
+            media_inline_audio_set_volume_from_x(
+                media_inline_audio_drag_document,
+                relative_x
+            );
+        }
+
+        return true;
+    }
+
+    if (
+        msg == WM_LBUTTONUP &&
+        media_inline_audio_drag_mode != 0
+    ) {
+        media_inline_audio_drag_mode = 0;
+        media_inline_audio_drag_document = -1;
+
+        if (GetCapture() == chat)
+            ReleaseCapture();
+
+        return true;
+    }
+
+    if (
+        msg != WM_LBUTTONDOWN &&
+        msg != WM_LBUTTONDBLCLK
+    ) {
+        return false;
+    }
+
+    for (
+        int i = 0;
+        i < (int)documents.size();
+        i++
+    ) {
+        RECT player = {0};
+
+        if (!media_inline_audio_get_player_rect(i, &player))
+            continue;
+
+        if (!PtInRect(&player, point))
+            continue;
+
+        // Swallow the second click of a double click.  The first button-down
+        // already performed the desired action.
+        if (msg == WM_LBUTTONDBLCLK)
+            return true;
+
+        int x =
+            point.x -
+            player.left;
+
+        int y =
+            point.y -
+            player.top;
+
+        if (
+            x >= 7 &&
+            x <= 41 &&
+            y >= 8 &&
+            y <= 46
+        ) {
+            media_inline_audio_begin_or_toggle(i);
+            return true;
+        }
+
+        if (
+            x >= 49 &&
+            x <= 232 &&
+            y >= 5 &&
+            y <= 29
+        ) {
+            if (
+                !media_inline_audio ||
+                !media_inline_audio_path[0] ||
+                _wcsicmp(
+                    documents[i].filename,
+                    media_inline_audio_path
+                ) != 0
+            ) {
+                media_inline_audio_begin_or_toggle(i);
+            }
+
+            media_inline_audio_drag_mode = 1;
+            media_inline_audio_drag_document = i;
+            SetCapture(chat);
+
+            media_inline_audio_set_seek_from_x(
+                i,
+                x
+            );
+
+            return true;
+        }
+
+        if (
+            x >= 262 &&
+            x <= 322 &&
+            y >= 5 &&
+            y <= 29
+        ) {
+            media_inline_audio_drag_mode = 2;
+            media_inline_audio_drag_document = i;
+            SetCapture(chat);
+
+            media_inline_audio_set_volume_from_x(
+                i,
+                x
+            );
+
+            return true;
+        }
+
+        // The rest of the panel is deliberately inert but still belongs to
+        // the embedded player, so don't let RichEdit treat it as a selection.
+        return true;
+    }
+
+    return false;
+}
+
+'''
+
+    s = s[:visual_pos] + graphical_helpers + s[visual_pos:]
+
+    visual_v4 = r'''static void media_inline_audio_apply_visual(
+    bool force
+) {
+    if (
+        !chat ||
+        !media_inline_audio ||
+        !media_inline_audio_path[0]
+    ) {
+        return;
+    }
+
+    MFP_MEDIAPLAYER_STATE state =
+        MFP_MEDIAPLAYER_STATE_EMPTY;
+
+    media_inline_audio->GetState(&state);
+
+    PROPVARIANT p = {0};
+    PROPVARIANT d = {0};
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+
+    if (
+        SUCCEEDED(
+            media_inline_audio->GetPosition(
+                MFP_POSITIONTYPE_100NS,
+                &p
+            )
+        ) &&
+        p.vt == VT_I8
+    ) {
+        position = p.hVal.QuadPart;
+    }
+
+    if (
+        SUCCEEDED(
+            media_inline_audio->GetDuration(
+                MFP_POSITIONTYPE_100NS,
+                &d
+            )
+        ) &&
+        d.vt == VT_I8
+    ) {
+        duration = d.hVal.QuadPart;
+    }
+
+    // Redraw at 2 Hz.  This is smooth enough for a small Win98-style player
+    // while avoiding constant OLE bitmap replacement in the RichEdit.
+    int visual_tick =
+        (int)(
+            position /
+            5000000LL
+        );
+
+    if (
+        !force &&
+        visual_tick ==
+            media_inline_audio_last_second
+    ) {
+        return;
+    }
+
+    media_inline_audio_last_second =
+        visual_tick;
+
+    bool playing =
+        state ==
+        MFP_MEDIAPLAYER_STATE_PLAYING;
+
+    for (
+        int i = 0;
+        i < (int)documents.size();
+        i++
+    ) {
+        if (
+            !documents[i].filename ||
+            _wcsicmp(
+                documents[i].filename,
+                media_inline_audio_path
+            ) != 0
+        ) {
+            continue;
+        }
+
+        media_inline_audio_replace_bitmap(
+            i,
+            position,
+            duration,
+            playing
+        );
+        break;
+    }
+}'''
+
+    s = replace_function(
+        s,
+        visual_signature,
+        visual_v4,
+    )
+
+    # Respect the user-selected inline volume whenever a new track is opened.
+    volume_old = "media_inline_audio->SetVolume(0.85f);"
+    volume_new = r'''media_inline_audio->SetVolume(
+            (float)media_inline_audio_volume /
+            100.0f
+        );'''
+    if volume_old in s:
+        s = s.replace(volume_old, volume_new, 1)
+
+write(t, s)
+
+
+# -----------------------------------------------------------------------------
+# message.cpp: replace the symbolic second line with an actual OLE bitmap.
+# -----------------------------------------------------------------------------
+s = read(m)
+
+if "media_inline_graphic_v4" not in s:
+    flags_anchor = "bool voice = false, gif = false, round = false, sticker = false, music = false, video = false, video_has_thumb = false; // media_inline_music_row_v2"
+    if flags_anchor not in s:
+        raise SystemExit("Could not locate v3 document flags for graphical audio player.")
+
+    s = s.replace(
+        flags_anchor,
+        flags_anchor
+        + "\n\t\tint media_duration_seconds = 0; // media_inline_graphic_v4",
+        1,
+    )
+
+    duration_anchor = '''\t\t\t\t\tif (duration < 3600) swprintf(duration_str, L" (%02d:%02d)", duration / 60, duration % 60);\n\t\t\t\t\telse swprintf(duration_str, L" (%02d:%02d:%02d)", duration / 3600, (duration / 60) % 60, duration % 60);'''
+
+    duration_new = duration_anchor + "\n\t\t\t\t\tmedia_duration_seconds = duration;"
+
+    if duration_anchor not in s:
+        raise SystemExit("Could not locate media duration formatting in message.cpp.")
+
+    s = s.replace(
+        duration_anchor,
+        duration_new,
+        1,
+    )
+
+    symbolic_old = r'''\t\t\tif (music)
+\t\t\t\twritten += riched_write(chat, L"[>] " );
+
+\t\t\twritten += riched_write(chat, document.filename);
+
+\t\t\tif (duration_str[0] == ' ')
+\t\t\t\twritten += riched_write(chat, &duration_str[0]);
+
+\t\t\twritten += riched_write(chat, &size_str[0]);
+
+\t\t\tif (music) {
+\t\t\t\twritten += riched_write(
+\t\t\t\t\tchat,
+\t\t\t\t\tL"\n    [--------------------] 00:00:00"
+\t\t\t\t);
+\t\t\t}
+
+\t\t\tdocument.max = cr_startmsg.cpMin + written;'''.replace('\\t', '\t')
+
+    graphic_new = r'''\t\t\twritten += riched_write(chat, document.filename);
+
+\t\t\tif (duration_str[0] == ' ')
+\t\t\t\twritten += riched_write(chat, &duration_str[0]);
+
+\t\t\twritten += riched_write(chat, &size_str[0]);
+
+\t\t\tif (music) {
+\t\t\t\twritten += riched_write(chat, L"\n");
+
+\t\t\t\tHBITMAP audio_player =
+\t\t\t\t\tmedia_inline_audio_make_bitmap(
+\t\t\t\t\t\tmedia_duration_seconds,
+\t\t\t\t\t\t0,
+\t\t\t\t\t\tfalse,
+\t\t\t\t\t\t85
+\t\t\t\t\t);
+
+\t\t\t\tif (audio_player) {
+\t\t\t\t\tinsert_image(
+\t\t\t\t\t\tchat,
+\t\t\t\t\t\tNULL,
+\t\t\t\t\t\taudio_player
+\t\t\t\t\t);
+
+\t\t\t\t\tDeleteObject(audio_player);
+\t\t\t\t\twritten++;
+\t\t\t\t}
+\t\t\t}
+
+\t\t\tdocument.max = cr_startmsg.cpMin + written;'''.replace('\\t', '\t')
+
+    if symbolic_old not in s:
+        raise SystemExit("Could not locate v3 symbolic inline-audio row.")
+
+    s = s.replace(
+        symbolic_old,
+        graphic_new,
+        1,
+    )
+
+write(m, s)
+
+
+# -----------------------------------------------------------------------------
+# procs.cpp: let the graphical player receive mouse interaction before the
+# RichEdit consumes the click as selection/link activity.
+# -----------------------------------------------------------------------------
+s = read(p)
+
+if "media_inline_audio_handle_chat_mouse" not in s:
+    start, end = function_range(
+        s,
+        "LRESULT CALLBACK WndProcChat("
+    )
+
+    proc = s[start:end]
+
+    proc_anchor = '''LRESULT CALLBACK WndProcChat(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {\n\tswitch (msg) {'''
+
+    proc_new = '''LRESULT CALLBACK WndProcChat(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {\n\tif (\n\t\t(msg == WM_LBUTTONDOWN ||\n\t\t msg == WM_LBUTTONUP ||\n\t\t msg == WM_LBUTTONDBLCLK ||\n\t\t msg == WM_MOUSEMOVE) &&\n\t\tmedia_inline_audio_handle_chat_mouse(\n\t\t\thWnd,\n\t\t\tmsg,\n\t\t\twParam,\n\t\t\tlParam\n\t\t)\n\t) {\n\t\treturn 0;\n\t}\n\n\tswitch (msg) {'''
+
+    if proc_anchor not in proc:
+        raise SystemExit("Could not locate WndProcChat prologue for v4.")
+
+    proc = proc.replace(
+        proc_anchor,
+        proc_new,
+        1,
+    )
+
+    s = s[:start] + proc + s[end:]
+
+write(p, s)
+
+
+# -----------------------------------------------------------------------------
+# Final v4 verification
+# -----------------------------------------------------------------------------
+checks_v4 = {
+    h: [
+        "media_tabs_av_v4",
+        "media_inline_audio_make_bitmap",
+        "media_inline_audio_handle_chat_mouse",
+    ],
+    t: [
+        "media_tabs_av_runtime_v4",
+        "media_player_seek_hold_until",
+        "media player seek target=",
+        "media_inline_audio_make_bitmap(",
+        "media_inline_audio_handle_chat_mouse(",
+        "media_inline_audio_drag_mode",
+    ],
+    m: [
+        "media_inline_graphic_v4",
+        "HBITMAP audio_player",
+        "media_inline_audio_make_bitmap(",
+    ],
+    p: [
+        "media_inline_audio_handle_chat_mouse(",
+    ],
+}
+
+for file_path, tokens in checks_v4.items():
+    text = read(file_path)
+    for token in tokens:
+        if token not in text:
+            raise SystemExit(
+                f"Media v4 verification failed in {file_path.name}: {token}"
+            )
+
+print(
+    "Applied Media A/V v4: reliable video seek and graphical inline audio "
+    "player with draggable seek/volume controls."
+)
