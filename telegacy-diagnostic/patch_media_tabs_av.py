@@ -6247,9 +6247,19 @@ static void media_inline_audio_commit_seek() {
 }'''
     s = s[:mouse_start] + mouse_v5 + s[mouse_end:]
 
+    # IMPORTANT: target the real definition, not the earlier forward
+    # declaration `static void media_inline_audio_apply_visual(bool force);`.
+    # Using the shorter prefix makes function_range() start at the declaration
+    # and consume media_inline_audio_release(), which breaks declaration order.
+    visual_signature = (
+        "static void media_inline_audio_apply_visual(\n"
+        "    bool force\n"
+        ") {"
+    )
+
     visual_start, visual_end = function_range(
         s,
-        "static void media_inline_audio_apply_visual("
+        visual_signature
     )
     visual_v5 = r'''static void media_inline_audio_apply_visual(
     bool force
@@ -6354,6 +6364,28 @@ for file_path, tokens in checks_v5.items():
             raise SystemExit(
                 f"Media v5 verification failed in {file_path.name}: {token}"
             )
+
+# Compile-order/regression checks for the inline-audio visual replacement.
+text = read(t)
+visual_definition = (
+    "static void media_inline_audio_apply_visual(\n"
+    "    bool force\n"
+    ") {"
+)
+if text.count(visual_definition) != 1:
+    raise SystemExit(
+        "Media v5 verification failed: expected exactly one "
+        "media_inline_audio_apply_visual body."
+    )
+for required in (
+    "static void media_inline_audio_apply_visual(bool force);",
+    "static void media_inline_audio_start_timer();",
+    "static void media_inline_audio_release() {",
+):
+    if required not in text:
+        raise SystemExit(
+            f"Media v5 verification failed: lost required declaration/helper: {required}"
+        )
 
 print(
     "Applied Media A/V v5: reliable video/audio seeking, robust MFPlay "
