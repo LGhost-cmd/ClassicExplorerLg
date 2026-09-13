@@ -6391,3 +6391,1104 @@ print(
     "Applied Media A/V v5: reliable video/audio seeking, robust MFPlay "
     "duration decoding, and 0.5x-2.0x playback speed controls."
 )
+
+
+# =============================================================================
+# Media A/V v5.2 - visual polish only + mod credit
+# - pin the video seek thumb/time during asynchronous MFPlay seek commit
+# - avoid double visual commit on TB_THUMBPOSITION + TB_ENDTRACK
+# - pin inline-audio seek rendering until MFPlay catches up
+# - immediately reflect requested Play/Pause state in the inline player bitmap
+# - brand the main window as a LatvianGhost modification
+# =============================================================================
+
+s = read(t)
+
+if "media_tabs_av_runtime_v52" not in s:
+    global_anchor = "static bool media_inline_audio_seek_dirty = false;"
+    if global_anchor not in s:
+        raise SystemExit("Could not locate v5 inline-audio visual globals for v5.2.")
+
+    s = s.replace(
+        global_anchor,
+        global_anchor
+        + r'''
+
+// media_tabs_av_runtime_v52
+// These values affect presentation only; playback/seek behavior stays v5.
+static int media_player_visual_seek_slider = -1;
+static DWORD media_inline_audio_visual_seek_hold_until = 0;
+static LONGLONG media_inline_audio_visual_seek_position = 0;
+static DWORD media_inline_audio_visual_play_hold_until = 0;
+static bool media_inline_audio_visual_playing = false;
+''',
+        1,
+    )
+
+    # -------------------------------------------------------------------------
+    # Video player: during MFPlay's asynchronous seek, render the committed
+    # slider/time rather than the stale position that GetPosition can return
+    # for a few timer ticks. This is presentation-only anti-snapback logic.
+    # -------------------------------------------------------------------------
+    update_v52 = r'''static void media_player_update_controls() {
+    if (!hMediaPlayerSeek)
+        return;
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+
+    if (!media_player_get_time(&position, &duration))
+        return;
+
+    bool seek_hold =
+        media_player_seek_hold_until != 0 &&
+        (LONG)(GetTickCount() - media_player_seek_hold_until) < 0;
+
+    LONGLONG visual_position = position;
+
+    if (
+        seek_hold &&
+        media_player_visual_seek_slider >= 0 &&
+        duration > 0
+    ) {
+        visual_position =
+            duration *
+            media_player_visual_seek_slider /
+            1000LL;
+
+        if (!media_player_user_seeking) {
+            SendMessageW(
+                hMediaPlayerSeek,
+                TBM_SETPOS,
+                TRUE,
+                media_player_visual_seek_slider
+            );
+        }
+    } else {
+        if (!seek_hold)
+            media_player_visual_seek_slider = -1;
+
+        if (!media_player_user_seeking) {
+            int slider =
+                (int)(
+                    position * 1000LL /
+                    duration
+                );
+
+            SendMessageW(
+                hMediaPlayerSeek,
+                TBM_SETPOS,
+                TRUE,
+                slider
+            );
+        }
+    }
+
+    if (hMediaPlayerTime) {
+        wchar_t now_text[32] = {0};
+        wchar_t total_text[32] = {0};
+        wchar_t combined[80] = {0};
+
+        media_player_format_time(
+            visual_position,
+            now_text,
+            ARRAYSIZE(now_text)
+        );
+
+        media_player_format_time(
+            duration,
+            total_text,
+            ARRAYSIZE(total_text)
+        );
+
+        _snwprintf(
+            combined,
+            ARRAYSIZE(combined) - 1,
+            L"%s / %s",
+            now_text,
+            total_text
+        );
+        combined[ARRAYSIZE(combined) - 1] = 0;
+
+        SetWindowTextW(
+            hMediaPlayerTime,
+            combined
+        );
+    }
+}'''
+    s = replace_function(
+        s,
+        "static void media_player_update_controls()",
+        update_v52,
+    )
+
+    proc_start, proc_end = function_range(
+        s,
+        "static LRESULT CALLBACK TelegacyMediaPlayerWindow("
+    )
+    proc = s[proc_start:proc_end]
+
+    seek_start = proc.find("            if (source == hMediaPlayerSeek) {")
+    seek_end = proc.find(
+        "\n            if (source == hMediaPlayerVolume) {",
+        seek_start,
+    )
+
+    if seek_start < 0 or seek_end < 0:
+        raise SystemExit("Could not isolate video seek branch for v5.2.")
+
+    seek_branch_v52 = r'''            if (source == hMediaPlayerSeek) {
+                int code = LOWORD(wParam);
+                int slider =
+                    (int)SendMessageW(
+                        hMediaPlayerSeek,
+                        TBM_GETPOS,
+                        0,
+                        0
+                    );
+
+                LONGLONG position = 0;
+                LONGLONG duration = 0;
+                media_player_get_time(
+                    &position,
+                    &duration
+                );
+
+                if (duration <= 0)
+                    duration = media_player_cached_duration;
+
+                if (code == TB_THUMBTRACK) {
+                    media_player_user_seeking = true;
+                    media_player_pending_seek_slider = slider;
+
+                    if (
+                        duration > 0 &&
+                        hMediaPlayerTime
+                    ) {
+                        LONGLONG preview =
+                            duration *
+                            slider /
+                            1000LL;
+
+                        wchar_t now_text[32] = {0};
+                        wchar_t total_text[32] = {0};
+                        wchar_t combined[80] = {0};
+
+                        media_player_format_time(
+                            preview,
+                            now_text,
+                            ARRAYSIZE(now_text)
+                        );
+
+                        media_player_format_time(
+                            duration,
+                            total_text,
+                            ARRAYSIZE(total_text)
+                        );
+
+                        _snwprintf(
+                            combined,
+                            ARRAYSIZE(combined) - 1,
+                            L"%s / %s",
+                            now_text,
+                            total_text
+                        );
+                        combined[ARRAYSIZE(combined) - 1] = 0;
+
+                        SetWindowTextW(
+                            hMediaPlayerTime,
+                            combined
+                        );
+                    }
+
+                    return 0;
+                }
+
+                // The trackbar normally sends TB_THUMBPOSITION and then
+                // TB_ENDTRACK for one mouse release. Keep the first value but
+                // commit only once on ENDTRACK, otherwise the thumb can flash.
+                if (code == TB_THUMBPOSITION) {
+                    media_player_user_seeking = true;
+                    media_player_pending_seek_slider = slider;
+                    return 0;
+                }
+
+                if (
+                    code == TB_ENDTRACK ||
+                    code == TB_LINEUP ||
+                    code == TB_LINEDOWN ||
+                    code == TB_PAGEUP ||
+                    code == TB_PAGEDOWN
+                ) {
+                    media_player_user_seeking = true;
+
+                    int committed_slider =
+                        media_player_pending_seek_slider >= 0
+                            ? media_player_pending_seek_slider
+                            : slider;
+
+                    if (duration > 0) {
+                        media_player_visual_seek_slider =
+                            committed_slider;
+
+                        SendMessageW(
+                            hMediaPlayerSeek,
+                            TBM_SETPOS,
+                            TRUE,
+                            committed_slider
+                        );
+
+                        media_player_set_position_v2(
+                            duration *
+                            committed_slider /
+                            1000LL
+                        );
+                    }
+
+                    media_player_pending_seek_slider = -1;
+                    media_player_user_seeking = false;
+                    return 0;
+                }
+
+                return 0;
+            }'''
+
+    proc = proc[:seek_start] + seek_branch_v52 + proc[seek_end:]
+    s = s[:proc_start] + proc + s[proc_end:]
+
+    # Reset the extra visual state together with the existing player state.
+    release_start, release_end = function_range(
+        s,
+        "static void media_player_release_graph()"
+    )
+    release_func = s[release_start:release_end]
+    release_anchor = "    media_player_seek_hold_until = 0;"
+    if release_anchor not in release_func:
+        raise SystemExit("Could not locate video seek visual reset anchor for v5.2.")
+    release_func = release_func.replace(
+        release_anchor,
+        release_anchor + "\n    media_player_visual_seek_slider = -1;",
+        1,
+    )
+    s = s[:release_start] + release_func + s[release_end:]
+
+    # -------------------------------------------------------------------------
+    # Inline audio: remember the target position briefly after mouse-up. MFPlay
+    # seeking is asynchronous, and the old code immediately redrew from the old
+    # GetPosition result, causing the bitmap thumb to jump backwards/forwards.
+    # -------------------------------------------------------------------------
+    commit_audio_v52 = r'''static void media_inline_audio_commit_seek() {
+    if (
+        !media_inline_audio ||
+        !media_inline_audio_seek_dirty
+    ) {
+        return;
+    }
+
+    MFP_MEDIAPLAYER_STATE state =
+        MFP_MEDIAPLAYER_STATE_EMPTY;
+
+    media_inline_audio->GetState(&state);
+
+    bool resume =
+        state == MFP_MEDIAPLAYER_STATE_PLAYING;
+
+    if (resume)
+        media_inline_audio->Pause();
+
+    PROPVARIANT value = {0};
+    value.vt = VT_I8;
+    value.hVal.QuadPart =
+        media_inline_audio_drag_preview;
+
+    HRESULT hr =
+        media_inline_audio->SetPosition(
+            MFP_POSITIONTYPE_100NS,
+            &value
+        );
+
+    diag_log(
+        "inline audio seek commit target=%I64d hr=0x%08X resume=%d",
+        media_inline_audio_drag_preview,
+        (unsigned int)hr,
+        resume ? 1 : 0
+    );
+
+    if (resume && SUCCEEDED(hr))
+        media_inline_audio->Play();
+
+    if (SUCCEEDED(hr)) {
+        media_inline_audio_visual_seek_position =
+            media_inline_audio_drag_preview;
+        media_inline_audio_visual_seek_hold_until =
+            GetTickCount() + 750;
+
+        // Pause/Play around SetPosition can also expose a stale state for one
+        // timer tick. Preserve the state the user actually had before seeking.
+        media_inline_audio_visual_playing = resume;
+        media_inline_audio_visual_play_hold_until =
+            GetTickCount() + 450;
+    }
+
+    media_inline_audio_seek_dirty = false;
+    media_inline_audio_last_second = -1;
+    media_inline_audio_apply_visual(true);
+}'''
+    s = replace_function(
+        s,
+        "static void media_inline_audio_commit_seek()",
+        commit_audio_v52,
+    )
+
+    # Same-track Play/Pause is asynchronous too. Record the state requested by
+    # the click so the glyph changes immediately and cannot briefly show the
+    # inverse icon while GetState is catching up.
+    toggle_start, toggle_end = function_range(
+        s,
+        "bool media_inline_audio_toggle("
+    )
+    toggle_func = s[toggle_start:toggle_end]
+
+    old_toggle = r'''            if (state == MFP_MEDIAPLAYER_STATE_PLAYING) {
+                hr = media_inline_audio->Pause();
+            } else {
+                hr = media_inline_audio->Play();
+            }'''
+    new_toggle = r'''            bool requested_playing =
+                state != MFP_MEDIAPLAYER_STATE_PLAYING;
+
+            if (requested_playing) {
+                hr = media_inline_audio->Play();
+            } else {
+                hr = media_inline_audio->Pause();
+            }
+
+            if (SUCCEEDED(hr)) {
+                media_inline_audio_visual_playing =
+                    requested_playing;
+                media_inline_audio_visual_play_hold_until =
+                    GetTickCount() + 550;
+                media_inline_audio_last_second = -1;
+                media_inline_audio_apply_visual(true);
+            }'''
+
+    if old_toggle not in toggle_func:
+        raise SystemExit("Could not locate same-track Play/Pause block for v5.2.")
+    toggle_func = toggle_func.replace(old_toggle, new_toggle, 1)
+
+    open_tail = r'''    media_inline_audio_last_second = -1;
+    media_inline_audio_start_timer();
+
+    return true;'''
+    open_tail_new = r'''    media_inline_audio_visual_playing = true;
+    media_inline_audio_visual_play_hold_until =
+        GetTickCount() + 650;
+    media_inline_audio_last_second = -1;
+    media_inline_audio_start_timer();
+    media_inline_audio_apply_visual(true);
+
+    return true;'''
+
+    if open_tail not in toggle_func:
+        raise SystemExit("Could not locate inline-audio open tail for v5.2.")
+    toggle_func = toggle_func.replace(open_tail, open_tail_new, 1)
+
+    s = s[:toggle_start] + toggle_func + s[toggle_end:]
+
+    # Speed changes pause/resume internally. Pin the old play state while the
+    # visual refresh following SetRate runs, avoiding an incorrect Play glyph.
+    rate_start, rate_end = function_range(
+        s,
+        "static bool media_inline_audio_apply_rate_index("
+    )
+    rate_func = s[rate_start:rate_end]
+    rate_anchor = r'''    if (resume && SUCCEEDED(hr))
+        media_inline_audio->Play();'''
+    rate_new = rate_anchor + r'''
+
+    if (SUCCEEDED(hr)) {
+        media_inline_audio_visual_playing = resume;
+        media_inline_audio_visual_play_hold_until =
+            GetTickCount() + 400;
+    }'''
+    if rate_anchor not in rate_func:
+        raise SystemExit("Could not locate inline-audio rate resume block for v5.2.")
+    rate_func = rate_func.replace(rate_anchor, rate_new, 1)
+    s = s[:rate_start] + rate_func + s[rate_end:]
+
+    # Final visual function: prefer drag preview, then committed seek hold, and
+    # prefer the explicitly requested button state for a short transition.
+    visual_v52 = r'''static void media_inline_audio_apply_visual(
+    bool force
+) {
+    if (
+        !chat ||
+        !media_inline_audio ||
+        !media_inline_audio_path[0]
+    ) {
+        return;
+    }
+
+    MFP_MEDIAPLAYER_STATE state =
+        MFP_MEDIAPLAYER_STATE_EMPTY;
+
+    media_inline_audio->GetState(&state);
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+
+    media_inline_audio_get_times_v5(
+        &position,
+        &duration
+    );
+
+    bool seek_visual_hold =
+        media_inline_audio_visual_seek_hold_until != 0 &&
+        (LONG)(
+            GetTickCount() -
+            media_inline_audio_visual_seek_hold_until
+        ) < 0;
+
+    if (
+        media_inline_audio_drag_mode == 1 &&
+        media_inline_audio_seek_dirty
+    ) {
+        position = media_inline_audio_drag_preview;
+    } else if (seek_visual_hold) {
+        position = media_inline_audio_visual_seek_position;
+    } else {
+        media_inline_audio_visual_seek_hold_until = 0;
+    }
+
+    int visual_tick =
+        (int)(
+            position /
+            5000000LL
+        );
+
+    if (
+        !force &&
+        visual_tick ==
+            media_inline_audio_last_second
+    ) {
+        return;
+    }
+
+    media_inline_audio_last_second =
+        visual_tick;
+
+    bool playing =
+        state == MFP_MEDIAPLAYER_STATE_PLAYING;
+
+    bool play_visual_hold =
+        media_inline_audio_visual_play_hold_until != 0 &&
+        (LONG)(
+            GetTickCount() -
+            media_inline_audio_visual_play_hold_until
+        ) < 0;
+
+    if (play_visual_hold) {
+        playing = media_inline_audio_visual_playing;
+    } else {
+        media_inline_audio_visual_play_hold_until = 0;
+    }
+
+    for (
+        int i = 0;
+        i < (int)documents.size();
+        i++
+    ) {
+        if (
+            !documents[i].filename ||
+            _wcsicmp(
+                documents[i].filename,
+                media_inline_audio_path
+            ) != 0
+        ) {
+            continue;
+        }
+
+        media_inline_audio_replace_bitmap(
+            i,
+            position,
+            duration,
+            playing
+        );
+        break;
+    }
+}'''
+
+    visual_signature = (
+        "static void media_inline_audio_apply_visual(\n"
+        "    bool force\n"
+        ") {"
+    )
+    s = replace_function(
+        s,
+        visual_signature,
+        visual_v52,
+    )
+
+    # Reset transition-only presentation state when audio is released.
+    audio_release_start, audio_release_end = function_range(
+        s,
+        "static void media_inline_audio_release()"
+    )
+    audio_release_func = s[audio_release_start:audio_release_end]
+    reset_anchor = "    media_inline_audio_seek_dirty = false;"
+    if reset_anchor not in audio_release_func:
+        raise SystemExit("Could not locate inline-audio visual reset anchor for v5.2.")
+    audio_release_func = audio_release_func.replace(
+        reset_anchor,
+        reset_anchor
+        + "\n    media_inline_audio_visual_seek_hold_until = 0;"
+        + "\n    media_inline_audio_visual_seek_position = 0;"
+        + "\n    media_inline_audio_visual_play_hold_until = 0;"
+        + "\n    media_inline_audio_visual_playing = false;",
+        1,
+    )
+    s = s[:audio_release_start] + audio_release_func + s[audio_release_end:]
+
+    # -------------------------------------------------------------------------
+    # Attribution: keep the original Telegacy name/copyright intact and add a
+    # clear, non-destructive modifier credit in the main window title.
+    # -------------------------------------------------------------------------
+    title_old = (
+        'hMain = CreateWindow(L"Telegacy", L"Telegacy", '
+        'WS_OVERLAPPEDWINDOW'
+    )
+    title_new = (
+        'hMain = CreateWindow(L"Telegacy", '
+        'L"Telegacy - LatvianGhost Mod", WS_OVERLAPPEDWINDOW'
+    )
+
+    if title_old in s:
+        s = s.replace(title_old, title_new, 1)
+    elif "LatvianGhost Mod" not in s:
+        raise SystemExit("Could not locate Telegacy main-window title for mod credit.")
+
+write(t, s)
+
+# -----------------------------------------------------------------------------
+# v5.2 verification
+# -----------------------------------------------------------------------------
+text = read(t)
+for token in (
+    "media_tabs_av_runtime_v52",
+    "media_player_visual_seek_slider",
+    "media_inline_audio_visual_seek_hold_until",
+    "media_inline_audio_visual_play_hold_until",
+    "code == TB_THUMBPOSITION",
+    "Telegacy - LatvianGhost Mod",
+):
+    if token not in text:
+        raise SystemExit(
+            f"Media v5.2 verification failed: {token}"
+        )
+
+visual_definition = (
+    "static void media_inline_audio_apply_visual(\n"
+    "    bool force\n"
+    ") {"
+)
+if text.count(visual_definition) != 1:
+    raise SystemExit(
+        "Media v5.2 verification failed: inline audio visual body count != 1"
+    )
+
+print(
+    "Applied Media A/V v5.2 visual polish: stable Play/Pause glyphs, "
+    "anti-jitter seek rendering, and LatvianGhost mod credit."
+)
+
+
+# =============================================================================
+# Media A/V v5.3 - deterministic Play/Pause glyph state
+# - the inline audio button is driven by the user's requested state, not by a
+#   potentially stale asynchronous MFPlay GetState() result
+# - a request stays visually latched until MFPlay confirms it on several
+#   consecutive refreshes
+# - seek/volume redraws use the same latched state, so dragging cannot flip the
+#   icon by accident
+# =============================================================================
+
+s = read(t)
+
+if "media_tabs_av_runtime_v53" not in s:
+    global_anchor = "static bool media_inline_audio_visual_playing = false;"
+    if global_anchor not in s:
+        raise SystemExit(
+            "Could not locate v5.2 inline-audio play visual globals for v5.3."
+        )
+
+    s = s.replace(
+        global_anchor,
+        global_anchor
+        + r'''
+
+// media_tabs_av_runtime_v53
+// -1 = no explicit request pending, 0 = user requested Pause, 1 = Play.
+// Do not clear this merely because a timer expired: MFPlay state transitions
+// are asynchronous, so the glyph should follow the user's command until the
+// backend has actually acknowledged it.
+static int media_inline_audio_requested_play_state = -1;
+static int media_inline_audio_requested_play_confirmations = 0;
+''',
+        1,
+    )
+
+    toggle_pos = s.find("bool media_inline_audio_toggle(")
+    if toggle_pos < 0:
+        raise SystemExit("Could not locate inline audio toggle for v5.3.")
+
+    state_helpers = r'''
+static bool media_inline_audio_visual_is_playing(
+    MFP_MEDIAPLAYER_STATE actual_state
+) {
+    if (media_inline_audio_requested_play_state >= 0) {
+        return
+            media_inline_audio_requested_play_state != 0;
+    }
+
+    return
+        actual_state ==
+        MFP_MEDIAPLAYER_STATE_PLAYING;
+}
+
+static void media_inline_audio_visual_request_playing(
+    bool playing
+) {
+    media_inline_audio_requested_play_state =
+        playing ? 1 : 0;
+
+    media_inline_audio_requested_play_confirmations = 0;
+
+    // Keep the old v5.2 fields synchronized for compatibility with code that
+    // may still inspect them, but v5.3 no longer relies on a short time limit.
+    media_inline_audio_visual_playing = playing;
+    media_inline_audio_visual_play_hold_until = 0;
+}
+
+static void media_inline_audio_visual_observe_backend(
+    MFP_MEDIAPLAYER_STATE actual_state
+) {
+    if (media_inline_audio_requested_play_state < 0)
+        return;
+
+    bool actual_playing =
+        actual_state ==
+        MFP_MEDIAPLAYER_STATE_PLAYING;
+
+    bool requested_playing =
+        media_inline_audio_requested_play_state != 0;
+
+    if (actual_playing == requested_playing) {
+        media_inline_audio_requested_play_confirmations++;
+
+        // Require more than one observation. This prevents one transient
+        // GetState() sample from releasing the visual latch too early.
+        if (
+            media_inline_audio_requested_play_confirmations >= 3
+        ) {
+            media_inline_audio_requested_play_state = -1;
+            media_inline_audio_requested_play_confirmations = 0;
+        }
+    } else {
+        media_inline_audio_requested_play_confirmations = 0;
+    }
+}
+
+'''
+
+    s = s[:toggle_pos] + state_helpers + s[toggle_pos:]
+
+    # ---------------------------------------------------------------------
+    # Replace the same-track toggle logic. The next command is derived from
+    # what the button currently represents, not from a possibly stale backend
+    # state. Thus Play can never redraw as Pause (or vice versa) just because
+    # GetState() has not caught up yet.
+    # ---------------------------------------------------------------------
+    toggle_start, toggle_end = function_range(
+        s,
+        "bool media_inline_audio_toggle("
+    )
+    toggle_func = s[toggle_start:toggle_end]
+
+    old_toggle = r'''            bool requested_playing =
+                state != MFP_MEDIAPLAYER_STATE_PLAYING;
+
+            if (requested_playing) {
+                hr = media_inline_audio->Play();
+            } else {
+                hr = media_inline_audio->Pause();
+            }
+
+            if (SUCCEEDED(hr)) {
+                media_inline_audio_visual_playing =
+                    requested_playing;
+                media_inline_audio_visual_play_hold_until =
+                    GetTickCount() + 550;
+                media_inline_audio_last_second = -1;
+                media_inline_audio_apply_visual(true);
+            }'''
+
+    new_toggle = r'''            bool currently_shown_as_playing =
+                media_inline_audio_visual_is_playing(
+                    state
+                );
+
+            bool requested_playing =
+                !currently_shown_as_playing;
+
+            if (requested_playing) {
+                hr = media_inline_audio->Play();
+            } else {
+                hr = media_inline_audio->Pause();
+            }
+
+            if (SUCCEEDED(hr)) {
+                media_inline_audio_visual_request_playing(
+                    requested_playing
+                );
+                media_inline_audio_last_second = -1;
+                media_inline_audio_apply_visual(true);
+            }'''
+
+    if old_toggle not in toggle_func:
+        raise SystemExit(
+            "Could not locate v5.2 same-track Play/Pause block for v5.3."
+        )
+
+    toggle_func = toggle_func.replace(
+        old_toggle,
+        new_toggle,
+        1,
+    )
+
+    old_open = r'''    media_inline_audio_visual_playing = true;
+    media_inline_audio_visual_play_hold_until =
+        GetTickCount() + 650;
+    media_inline_audio_last_second = -1;'''
+
+    new_open = r'''    media_inline_audio_visual_request_playing(true);
+    media_inline_audio_last_second = -1;'''
+
+    if old_open not in toggle_func:
+        raise SystemExit(
+            "Could not locate v5.2 initial Play visual block for v5.3."
+        )
+
+    toggle_func = toggle_func.replace(
+        old_open,
+        new_open,
+        1,
+    )
+
+    s = s[:toggle_start] + toggle_func + s[toggle_end:]
+
+    # ---------------------------------------------------------------------
+    # Seek preview must use the exact same visual state as the button. Without
+    # this, moving the seek thumb could redraw a stale inverse icon.
+    # ---------------------------------------------------------------------
+    seek_start, seek_end = function_range(
+        s,
+        "static void media_inline_audio_set_seek_from_x("
+    )
+    seek_func = s[seek_start:seek_end]
+
+    old_seek_draw = r'''    media_inline_audio_replace_bitmap(
+        document_index,
+        media_inline_audio_drag_preview,
+        duration,
+        state == MFP_MEDIAPLAYER_STATE_PLAYING
+    );'''
+
+    new_seek_draw = r'''    media_inline_audio_replace_bitmap(
+        document_index,
+        media_inline_audio_drag_preview,
+        duration,
+        media_inline_audio_visual_is_playing(
+            state
+        )
+    );'''
+
+    if old_seek_draw not in seek_func:
+        raise SystemExit(
+            "Could not locate inline seek preview bitmap redraw for v5.3."
+        )
+
+    seek_func = seek_func.replace(
+        old_seek_draw,
+        new_seek_draw,
+        1,
+    )
+    s = s[:seek_start] + seek_func + s[seek_end:]
+
+    # Volume dragging also redraws the bitmap. Make it respect the requested
+    # Play/Pause state instead of sampling raw MFPlay state directly.
+    volume_start, volume_end = function_range(
+        s,
+        "static void media_inline_audio_set_volume_from_x("
+    )
+    volume_func = s[volume_start:volume_end]
+
+    old_volume_state = r'''media_inline_audio->GetState(&state);
+        playing =
+            state == MFP_MEDIAPLAYER_STATE_PLAYING;'''
+
+    new_volume_state = r'''media_inline_audio->GetState(&state);
+        playing =
+            media_inline_audio_visual_is_playing(
+                state
+            );'''
+
+    if old_volume_state not in volume_func:
+        raise SystemExit(
+            "Could not locate inline volume visual-state block for v5.3."
+        )
+
+    volume_func = volume_func.replace(
+        old_volume_state,
+        new_volume_state,
+        1,
+    )
+    s = s[:volume_start] + volume_func + s[volume_end:]
+
+    # ---------------------------------------------------------------------
+    # Internal pause/resume operations used by seeking and SetRate must not
+    # make the button flash. Latch the pre-operation presentation unless an
+    # explicit user command is already pending.
+    # ---------------------------------------------------------------------
+    commit_start, commit_end = function_range(
+        s,
+        "static void media_inline_audio_commit_seek()"
+    )
+    commit_func = s[commit_start:commit_end]
+
+    old_commit_hold = r'''        // Pause/Play around SetPosition can also expose a stale state for one
+        // timer tick. Preserve the state the user actually had before seeking.
+        media_inline_audio_visual_playing = resume;
+        media_inline_audio_visual_play_hold_until =
+            GetTickCount() + 450;'''
+
+    new_commit_hold = r'''        // Pause/Play around SetPosition is an internal implementation detail.
+        // Preserve the visible state until MFPlay confirms the resumed state.
+        if (media_inline_audio_requested_play_state < 0) {
+            media_inline_audio_visual_request_playing(
+                resume
+            );
+        }'''
+
+    if old_commit_hold not in commit_func:
+        raise SystemExit(
+            "Could not locate v5.2 seek Play/Pause visual hold for v5.3."
+        )
+
+    commit_func = commit_func.replace(
+        old_commit_hold,
+        new_commit_hold,
+        1,
+    )
+    s = s[:commit_start] + commit_func + s[commit_end:]
+
+    rate_start, rate_end = function_range(
+        s,
+        "static bool media_inline_audio_apply_rate_index("
+    )
+    rate_func = s[rate_start:rate_end]
+
+    old_rate_hold = r'''    if (SUCCEEDED(hr)) {
+        media_inline_audio_visual_playing = resume;
+        media_inline_audio_visual_play_hold_until =
+            GetTickCount() + 400;
+    }'''
+
+    new_rate_hold = r'''    if (
+        SUCCEEDED(hr) &&
+        media_inline_audio_requested_play_state < 0
+    ) {
+        media_inline_audio_visual_request_playing(
+            resume
+        );
+    }'''
+
+    if old_rate_hold not in rate_func:
+        raise SystemExit(
+            "Could not locate v5.2 speed Play/Pause visual hold for v5.3."
+        )
+
+    rate_func = rate_func.replace(
+        old_rate_hold,
+        new_rate_hold,
+        1,
+    )
+    s = s[:rate_start] + rate_func + s[rate_end:]
+
+    # ---------------------------------------------------------------------
+    # Final redraw: a pending user request always wins. Only after three
+    # consecutive backend confirmations is raw GetState() allowed to control
+    # the glyph again.
+    # ---------------------------------------------------------------------
+    visual_v53 = r'''static void media_inline_audio_apply_visual(
+    bool force
+) {
+    if (
+        !chat ||
+        !media_inline_audio ||
+        !media_inline_audio_path[0]
+    ) {
+        return;
+    }
+
+    MFP_MEDIAPLAYER_STATE state =
+        MFP_MEDIAPLAYER_STATE_EMPTY;
+
+    media_inline_audio->GetState(&state);
+
+    LONGLONG position = 0;
+    LONGLONG duration = 0;
+
+    media_inline_audio_get_times_v5(
+        &position,
+        &duration
+    );
+
+    bool seek_visual_hold =
+        media_inline_audio_visual_seek_hold_until != 0 &&
+        (LONG)(
+            GetTickCount() -
+            media_inline_audio_visual_seek_hold_until
+        ) < 0;
+
+    if (
+        media_inline_audio_drag_mode == 1 &&
+        media_inline_audio_seek_dirty
+    ) {
+        position = media_inline_audio_drag_preview;
+    } else if (seek_visual_hold) {
+        position = media_inline_audio_visual_seek_position;
+    } else {
+        media_inline_audio_visual_seek_hold_until = 0;
+    }
+
+    int visual_tick =
+        (int)(
+            position /
+            5000000LL
+        );
+
+    bool playing =
+        media_inline_audio_visual_is_playing(
+            state
+        );
+
+    // Observe the backend after choosing the current visual state. Even when
+    // this call reaches the required confirmation count, this frame remains
+    // exactly what the user requested; the next frame may safely use backend
+    // state because it has then been confirmed stable.
+    media_inline_audio_visual_observe_backend(
+        state
+    );
+
+    if (
+        !force &&
+        visual_tick ==
+            media_inline_audio_last_second
+    ) {
+        return;
+    }
+
+    media_inline_audio_last_second =
+        visual_tick;
+
+    for (
+        int i = 0;
+        i < (int)documents.size();
+        i++
+    ) {
+        if (
+            !documents[i].filename ||
+            _wcsicmp(
+                documents[i].filename,
+                media_inline_audio_path
+            ) != 0
+        ) {
+            continue;
+        }
+
+        media_inline_audio_replace_bitmap(
+            i,
+            position,
+            duration,
+            playing
+        );
+        break;
+    }
+}'''
+
+    visual_signature = (
+        "static void media_inline_audio_apply_visual(\n"
+        "    bool force\n"
+        ") {"
+    )
+
+    s = replace_function(
+        s,
+        visual_signature,
+        visual_v53,
+    )
+
+    # Reset the deterministic latch together with the other inline-player
+    # state so opening another track cannot inherit the previous glyph.
+    release_start, release_end = function_range(
+        s,
+        "static void media_inline_audio_release()"
+    )
+    release_func = s[release_start:release_end]
+
+    reset_anchor = "    media_inline_audio_visual_playing = false;"
+    if reset_anchor not in release_func:
+        raise SystemExit(
+            "Could not locate v5.2 inline-audio visual reset for v5.3."
+        )
+
+    release_func = release_func.replace(
+        reset_anchor,
+        reset_anchor
+        + "\n    media_inline_audio_requested_play_state = -1;"
+        + "\n    media_inline_audio_requested_play_confirmations = 0;",
+        1,
+    )
+    s = s[:release_start] + release_func + s[release_end:]
+
+write(t, s)
+
+# Final v5.3 regression checks.
+text = read(t)
+checks_v53 = [
+    "media_tabs_av_runtime_v53",
+    "media_inline_audio_requested_play_state",
+    "media_inline_audio_visual_is_playing",
+    "media_inline_audio_visual_request_playing",
+    "media_inline_audio_visual_observe_backend",
+    "currently_shown_as_playing",
+]
+
+for token in checks_v53:
+    if token not in text:
+        raise SystemExit(
+            f"Media v5.3 verification failed: {token}"
+        )
+
+if text.count(
+    "static void media_inline_audio_apply_visual(\n"
+    "    bool force\n"
+    ") {"
+) != 1:
+    raise SystemExit(
+        "Media v5.3 regression: expected exactly one inline-audio visual body."
+    )
+
+print(
+    "Applied Media A/V v5.3: deterministic inline Play/Pause glyph state."
+)
