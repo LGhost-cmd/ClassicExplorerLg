@@ -1941,29 +1941,51 @@ write(p, s)
 # ---------------------------------------------------------------------------
 s = read(r)
 
-pfp_start = s.find("if (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0)")
-if pfp_start < 0:
-    raise SystemExit("Could not locate current avatar response block for v3.")
-pfp_end = s.find("\n\t\t\tbreak;", pfp_start)
-if pfp_end < 0:
-    raise SystemExit("Could not isolate current avatar response block for v3.")
-pfp_fragment = s[pfp_start:pfp_end]
-
-needle = "\t\t\t\tif (decoded) {\n\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
-replacement = (
+# There are several pfp_msgid checks in response.cpp (including migration /
+# retry paths).  Do not grab the first one.  Target the exact decoded-bitmap
+# sequence installed by our v2 patch above.
+current_avatar_anchor = (
+    "\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);\n"
+    "\t\t\t\tif (decoded) {\n"
+    "\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
+)
+current_avatar_replacement = (
+    "\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);\n"
     "\t\t\t\tif (decoded) {\n"
     "\t\t\t\t\tprofile_gallery_update_metadata(decoded, bytes_len);\n"
     "\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
 )
-if needle not in pfp_fragment:
-    raise SystemExit("Could not locate current avatar decoded bitmap for metadata.")
-pfp_fragment = pfp_fragment.replace(needle, replacement, 1)
-pfp_fragment = pfp_fragment.replace(
-    "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160,",
-    "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220,",
+
+if current_avatar_anchor not in s:
+    raise SystemExit(
+        "Could not locate the v2 current-avatar decode block for v3 metadata."
+    )
+
+s = s.replace(
+    current_avatar_anchor,
+    current_avatar_replacement,
     1,
 )
-s = s[:pfp_start] + pfp_fragment + s[pfp_end:]
+
+# Resize only the SetWindowPos which belongs to that same current-avatar path.
+# Start searching immediately after the unique metadata call we just inserted,
+# so other 160x160 controls elsewhere in response.cpp are left untouched.
+meta_pos = s.find(
+    "profile_gallery_update_metadata(decoded, bytes_len);"
+)
+if meta_pos < 0:
+    raise SystemExit("Current-avatar metadata insertion disappeared unexpectedly.")
+
+size_old = "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160,"
+size_pos = s.find(size_old, meta_pos)
+if size_pos < 0:
+    raise SystemExit("Could not locate current-avatar 160x160 SetWindowPos for v3.")
+
+s = (
+    s[:size_pos]
+    + "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220,"
+    + s[size_pos + len(size_old):]
+)
 
 write(r, s)
 
