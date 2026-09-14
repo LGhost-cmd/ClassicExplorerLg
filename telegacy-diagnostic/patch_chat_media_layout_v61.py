@@ -1,17 +1,63 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
     raise SystemExit("Usage: patch_chat_media_layout_v61.py <Telegacy source directory>")
 
 root = Path(sys.argv[1]).resolve()
-t = root / "src" / "telegacy.cpp"
-m = root / "src" / "message.cpp"
-hp = root / "src" / "helpers.cpp"
-r = root / "src" / "response.cpp"
+repo_root = Path(__file__).resolve().parent.parent
 
-for path in (t, m, hp, r):
+# Preserve the already-tested v6.1 layout patch, then layer the thumbnail
+# quality fix on top. Full helper history is checked out by the workflow.
+V61_BLOB_SHA = "f192905540f4cdd0e9fef5b6f4c593d91b543647"
+
+try:
+    source = subprocess.check_output(
+        ["git", "cat-file", "blob", V61_BLOB_SHA],
+        cwd=str(repo_root),
+        stderr=subprocess.STDOUT,
+    ).decode("utf-8")
+except Exception as exc:
+    raise SystemExit(
+        "Could not obtain the pinned chat media v6.1 patch "
+        f"({V61_BLOB_SHA}) from local git history: {exc}"
+    )
+
+old_argv = sys.argv[:]
+namespace = {
+    "__name__": "__main__",
+    "__file__": "patch_chat_media_layout_v61_pinned.py",
+}
+
+try:
+    sys.argv = [
+        "patch_chat_media_layout_v61_pinned.py",
+        str(root),
+    ]
+    try:
+        exec(
+            compile(
+                source,
+                "patch_chat_media_layout_v61_pinned.py",
+                "exec",
+            ),
+            namespace,
+            namespace,
+        )
+    except SystemExit as exc:
+        if exc.code not in (None, 0):
+            raise
+finally:
+    sys.argv = old_argv
+
+hp = root / "src" / "helpers.cpp"
+m = root / "src" / "message.cpp"
+r = root / "src" / "response.cpp"
+t = root / "src" / "telegacy.cpp"
+
+for path in (hp, m, r, t):
     if not path.exists():
         raise SystemExit(f"Missing expected Telegacy file: {path}")
 
@@ -24,221 +70,114 @@ def write(path, data):
     path.write_text(data, encoding="latin-1", newline="\r\n")
 
 
-def function_range(source, signature):
-    start = source.find(signature)
-    if start < 0:
-        raise SystemExit(f"Could not locate C++ function: {signature}")
-    brace = source.find("{", start)
-    if brace < 0:
-        raise SystemExit(f"Could not locate opening brace: {signature}")
-    depth = 0
-    in_string = in_char = in_line = in_block = escaped = False
-    i = brace
-    while i < len(source):
-        c = source[i]
-        n = source[i + 1] if i + 1 < len(source) else ""
-        if in_line:
-            if c == "\n":
-                in_line = False
-            i += 1
-            continue
-        if in_block:
-            if c == "*" and n == "/":
-                in_block = False
-                i += 2
-                continue
-            i += 1
-            continue
-        if in_string:
-            if escaped:
-                escaped = False
-            elif c == "\\":
-                escaped = True
-            elif c == '"':
-                in_string = False
-            i += 1
-            continue
-        if in_char:
-            if escaped:
-                escaped = False
-            elif c == "\\":
-                escaped = True
-            elif c == "'":
-                in_char = False
-            i += 1
-            continue
-        if c == "/" and n == "/":
-            in_line = True
-            i += 2
-            continue
-        if c == "/" and n == "*":
-            in_block = True
-            i += 2
-            continue
-        if c == '"':
-            in_string = True
-            i += 1
-            continue
-        if c == "'":
-            in_char = True
-            i += 1
-            continue
-        if c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return start, i + 1
-        i += 1
-    raise SystemExit(f"Could not locate closing brace: {signature}")
+if "chat_media_layout_v61" not in read(t):
+    raise SystemExit(
+        "Pinned chat media v6.1 patch finished, but its marker was not found."
+    )
 
-
-if "chat_media_layout_v60" not in read(t):
-    raise SystemExit("Chat media layout v6.0 was not found. Run patch_chat_media_layout.py first.")
-if "chat_media_layout_v61" in read(t):
-    print("Chat media layout v6.1 already applied.")
-    raise SystemExit(0)
-
-# Larger framed cards: 288x216 logical pixels.
+# ---------------------------------------------------------------------------
+# High-quality previews.
+#
+# Telegacy's original get_photo() always asks Telegram for thumb type "m".
+# More importantly, IMAGELOADPOLICY==1 never asks the server at all: it keeps
+# the tiny stripped JPEG embedded in the message and our large 288x216 card
+# merely magnifies those few pixels. That is the pixelation visible in chat.
+#
+# For normal photos request Telegram's "x" preview when the message advertises
+# x/y/w sizes (x is normally around the 800px class and comfortably fits the
+# fixed chat card). Keep m for smaller photos and for document/video thumbs.
+# ---------------------------------------------------------------------------
 s = read(hp)
-start, end = function_range(s, "HBITMAP media_chat_make_photo_card(")
-func = s[start:end]
-func2 = func.replace("const int card_w = 224;", "const int card_w = 288;", 1)
-func2 = func2.replace("const int card_h = 168;", "const int card_h = 216;", 1)
-if func2 == func:
-    raise SystemExit("Could not enlarge media_chat_make_photo_card.")
-s = s[:start] + func2 + s[end:]
+old = "\tunenc_query[offset_query] = 1;\n\tunenc_query[offset_query + 1] = 'm';"
+new = r'''\tunenc_query[offset_query] = 1;
 
-start, end = function_range(s, "static HBITMAP media_chat_make_video_preview(")
-func = s[start:end]
-func2 = func.replace("const int width = 224;", "const int width = 288;", 1)
-func2 = func2.replace("const int height = 168;", "const int height = 216;", 1)
-if func2 == func:
-    raise SystemExit("Could not enlarge media_chat_make_video_preview.")
-s = s[:start] + func2 + s[end:]
+\t// chat_media_hq_preview_v62
+\tchar chat_preview_type = 'm';
+\tif (
+\t\t!rce &&
+\t\tdocument &&
+\t\tdocument->photo_size != 1 &&
+\t\tdocument->photo_size != 3
+\t) {
+\t\t// Normal Telegram photos commonly expose s/m/x/y/w.  x gives a crisp
+\t\t// preview for a 288x216 logical-pixel card without fetching the original.
+\t\tif (
+\t\t\tdocument->photo_size == 'x' ||
+\t\t\tdocument->photo_size == 'y' ||
+\t\t\tdocument->photo_size == 'w'
+\t\t) {
+\t\t\tchat_preview_type = 'x';
+\t\t} else if (
+\t\t\tdocument->photo_size == 'm' ||
+\t\t\tdocument->photo_size == 's'
+\t\t) {
+\t\t\tchat_preview_type = document->photo_size;
+\t\t}
+\t}
 
-# Deterministic OLE replacement: delete the selected preview first. RichEdit
-# can otherwise insert the new OLE beside the selected one and show both.
-start, end = function_range(s, "int replace_in_chat(")
-func = s[start:end]
-old = '''\t\t\tif (media_card)\n\t\t\t\tdisplay_bitmap = media_card;\n\n\t\t\tinsert_image(\n\t\t\t\tchat,\n\t\t\t\tNULL,\n\t\t\t\tdisplay_bitmap\n\t\t\t);\n\n\t\t\tif (media_card)\n\t\t\t\tDeleteObject(media_card);\n\n\t\t\tSendMessage(chat, EM_SETSEL, min, max);\n\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);\n\t\t\tdiff = 0;'''
-new = '''\t\t\tif (media_card)\n\t\t\t\tdisplay_bitmap = media_card;\n\n\t\t\t// chat_media_layout_v61: replace, never append beside old OLE.\n\t\t\tSendMessage(chat, EM_REPLACESEL, FALSE, (LPARAM)L"");\n\n\t\t\tinsert_image(\n\t\t\t\tchat,\n\t\t\t\tNULL,\n\t\t\t\tdisplay_bitmap\n\t\t\t);\n\n\t\t\tif (media_card)\n\t\t\t\tDeleteObject(media_card);\n\n\t\t\tSendMessage(chat, EM_SETSEL, min, min + 1);\n\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);\n\t\t\tdiff = 1 - (max - min);'''
-if old not in func:
-    raise SystemExit("Could not locate v6.0 OLE replacement block in replace_in_chat.")
-func = func.replace(old, new, 1)
-s = s[:start] + func + s[end:]
+\tunenc_query[offset_query + 1] = chat_preview_type;'''.replace('\\t', '\t')
+if old not in s:
+    raise SystemExit("Could not locate Telegram thumbnail type selection in get_photo().")
+s = s.replace(old, new, 1)
 write(hp, s)
 
-# message.cpp: larger video placeholder and strict media-block layout.
+# If images are enabled at all, replace the embedded stripped thumbnail with a
+# real Telegram preview. Mode 0 still means no network image loading.
 s = read(m)
-start, end = function_range(s, "static HBITMAP media_chat_video_placeholder()")
-func = s[start:end]
-func2 = func.replace("const int width = 224;", "const int width = 288;", 1)
-func2 = func2.replace("const int height = 168;", "const int height = 216;", 1)
-if func2 == func:
-    raise SystemExit("Could not enlarge media_chat_video_placeholder.")
-s = s[:start] + func2 + s[end:]
-
-# Grouped media used to delete the separator before the next image, allowing
-# a following image/text fragment to continue on the same line. Disable that.
-old = "\t\tif (!to_front && !header && !msghastext) {"
-new = "\t\tif (!to_front && !header && !msghastext && !group_media) { // chat_media_block_v61"
-if old not in s:
-    raise SystemExit("Could not locate grouped-media newline removal block.")
-s = s.replace(old, new, 1)
-
-# Inline chat always uses one common photo-card renderer. Album tiles remain
-# available for the Media archive only.
-old = '''\t\t\tif (hClone) {\n\t\t\t\tmedia_card =\n\t\t\t\t\tgroup_media\n\t\t\t\t\t\t? media_album_make_tile(hClone)\n\t\t\t\t\t\t: media_chat_make_photo_card(hClone);\n\n\t\t\t\tif (media_card)\n\t\t\t\t\tdisplay_bitmap = media_card;\n\t\t\t}'''
-new = '''\t\t\tif (hClone) {\n\t\t\t\tmedia_card = media_chat_make_photo_card(hClone);\n\n\t\t\t\tif (media_card)\n\t\t\t\t\tdisplay_bitmap = media_card;\n\t\t\t}'''
-if old not in s:
-    raise SystemExit("Could not locate v6.0 initial photo-card selection.")
-s = s.replace(old, new, 1)
-
-# Do not suppress the final message separator for edited albums. This keeps
-# every media item as a block after message text.
-old = "\tbool addnewline = (editing && added_photo && group_media && editing_index != messages.size() - 1 && messages[editing_index + 1].start_char == messages[editing_index + 1].end_header) ? false : true;"
-new = "\tbool addnewline = true; // chat_media_block_v61"
-if old not in s:
-    raise SystemExit("Could not locate addnewline album rule.")
-s = s.replace(old, new, 1)
-
-# Video cards already get a newline from the footer/final message separator.
-# Remove the extra immediate newline created by v5.6 to match photo spacing.
-video_old = '''\t\t\t\t\t\tfree(document.filename);\n\t\t\t\t\t\tfree(document.file_reference);\n\t\t\t\t\t\tdocument.filename = NULL;\n\t\t\t\t\t\tdocument.file_reference = NULL;\n\n\t\t\t\t\t\twritten += riched_write(\n\t\t\t\t\t\t\tchat,\n\t\t\t\t\t\t\tL"\\n"\n\t\t\t\t\t\t);'''
-video_new = '''\t\t\t\t\t\tfree(document.filename);\n\t\t\t\t\t\tfree(document.file_reference);\n\t\t\t\t\t\tdocument.filename = NULL;\n\t\t\t\t\t\tdocument.file_reference = NULL;\n\t\t\t\t\t\t// chat_media_block_v61: footer/final separator owns the newline.'''
-if video_old not in s:
-    raise SystemExit("Could not locate video-card trailing newline.")
-s = s.replace(video_old, video_new, 1)
+count = s.count("IMAGELOADPOLICY == 2")
+if count < 2:
+    raise SystemExit(
+        f"Expected chat image auto-load checks in message.cpp, found {count}."
+    )
+s = s.replace("IMAGELOADPOLICY == 2", "IMAGELOADPOLICY != 0")
 write(m, s)
 
-# response.cpp: remove the pre-wrapped album tile. replace_in_chat now receives
-# the real decoded bitmap and creates exactly one chat card from it.
+# History/search/context loading has separate one-at-a-time queues. Apply the
+# same rule there so older messages also upgrade from stripped to clean thumbs.
 s = read(r)
-old = '''\t\t\t\tif (documents[i].visible) {\n                    HBITMAP chat_bitmap = hClone;\n                    HBITMAP album_tile = NULL;\n\n                    if (\n                        hClone &&\n                        media_album_is_document(\n                            documents[i].id\n                        )\n                    ) {\n                        album_tile =\n                            media_album_make_tile(\n                                hClone\n                            );\n\n                        if (album_tile)\n                            chat_bitmap = album_tile;\n                    }\n\n                    replace_in_chat(\n                        NULL,\n                        &cr,\n                        NULL,\n                        chat_bitmap,\n                        NULL,\n                        NULL,\n                        NULL\n                    );\n\n                    if (album_tile)\n                        DeleteObject(album_tile);\n                }'''
-new = '''\t\t\t\tif (documents[i].visible) {\n                    // chat_media_block_v61: one decoded image -> one chat card.\n                    replace_in_chat(\n                        NULL,\n                        &cr,\n                        NULL,\n                        hClone,\n                        NULL,\n                        NULL,\n                        NULL\n                    );\n                }'''
-if old not in s:
-    raise SystemExit("Could not locate response-side album double-wrap block.")
-s = s.replace(old, new, 1)
+count = s.count("IMAGELOADPOLICY == 2")
+if count < 3:
+    raise SystemExit(
+        f"Expected history image auto-load checks in response.cpp, found {count}."
+    )
+s = s.replace("IMAGELOADPOLICY == 2", "IMAGELOADPOLICY != 0")
 write(r, s)
 
-# telegacy.cpp: archive tiles and video hit rectangle match the larger card.
+# Marker lives in telegacy.cpp so the final generated artifact is easy to audit.
 s = read(t)
-start, end = function_range(s, "HBITMAP media_album_make_tile(")
-func = s[start:end]
-func2 = func.replace("const int tile_w = 224;", "const int tile_w = 288;", 1)
-func2 = func2.replace("const int tile_h = 168;", "const int tile_h = 216;", 1)
-if func2 == func:
-    raise SystemExit("Could not enlarge media_album_make_tile.")
-s = s[:start] + func2 + s[end:]
-
-start, end = function_range(s, "bool media_chat_video_handle_chat_mouse(")
-func = s[start:end]
-func2 = func.replace("                        224,", "                        288,", 1)
-func2 = func2.replace("                        168,", "                        216,", 1)
-if func2 == func:
-    raise SystemExit("Could not enlarge video-card hit rectangle.")
-s = s[:start] + func2 + s[end:]
-
-marker = "// chat_media_layout_v60"
+marker = "// chat_media_layout_v61"
 if marker not in s:
-    raise SystemExit("Could not locate v6.0 marker in telegacy.cpp.")
-s = s.replace(marker, marker + "\n// chat_media_layout_v61", 1)
+    raise SystemExit("Could not locate chat media v6.1 marker.")
+s = s.replace(
+    marker,
+    marker + "\n// chat_media_hq_preview_v62",
+    1,
+)
 write(t, s)
 
 checks = {
     hp: [
-        "const int card_w = 288;",
-        "const int card_h = 216;",
-        "chat_media_layout_v61: replace, never append beside old OLE",
-        "diff = 1 - (max - min);",
+        "chat_media_hq_preview_v62",
+        "char chat_preview_type = 'm';",
+        "chat_preview_type = 'x';",
+        "unenc_query[offset_query + 1] = chat_preview_type;",
     ],
-    m: [
-        "const int width = 288;",
-        "!msghastext && !group_media",
-        "media_card = media_chat_make_photo_card(hClone);",
-        "bool addnewline = true; // chat_media_block_v61",
-        "footer/final separator owns the newline",
-    ],
-    r: [
-        "chat_media_block_v61: one decoded image -> one chat card",
-        "                        hClone,",
-    ],
-    t: [
-        "chat_media_layout_v61",
-        "const int tile_w = 288;",
-        "const int tile_h = 216;",
-        "                        288,",
-        "                        216,",
-    ],
+    m: ["IMAGELOADPOLICY != 0"],
+    r: ["IMAGELOADPOLICY != 0"],
+    t: ["chat_media_hq_preview_v62"],
 }
+
 for path, tokens in checks.items():
     data = read(path)
     for token in tokens:
         if token not in data:
-            raise SystemExit(f"Chat media v6.1 verification failed in {path.name}: {token}")
+            raise SystemExit(
+                f"Chat media HQ preview v6.2 verification failed in "
+                f"{path.name}: {token}"
+            )
 
 print(
-    "Applied chat media v6.1: 288x216 previews, no duplicate OLE insertion, "
-    "single-pass full-photo replacement, and media stays in a separate block after text."
+    "Applied chat media v6.1 plus v6.2 HQ previews: displayed photos now "
+    "upgrade from stripped JPEGs to real Telegram x/m thumbnails while the "
+    "288x216 framed block layout remains unchanged."
 )
