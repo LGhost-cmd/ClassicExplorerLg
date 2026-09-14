@@ -24,10 +24,11 @@ def write(path, data):
     path.write_text(data, encoding="latin-1", newline="\r\n")
 
 
-# This patch deliberately runs before the v6.0/v6.4 chat-media layout patches.
-# It changes the policy gates that decide whether ordinary chat photos are
-# requested from Telegram. IMAGELOADPOLICY==0 remains the explicit
-# no-network-image mode.
+# Keep chat image autoload enabled for every non-zero image policy. The later
+# v6.4 interceptor handles these requests with the custom serial full-photo
+# loader; we deliberately do NOT restore Telegacy 1.0.4's native get_photo
+# request path here because runs #70/#72 showed a repeatable memcpy crash while
+# opening history-heavy chats.
 if "chat_media_autoload_v65" in read(t):
     print("Chat media autoload v6.5 already applied.")
     raise SystemExit(0)
@@ -79,24 +80,18 @@ for path, tokens in checks.items():
                 f"Chat media autoload v6.5 verification failed in {path.name}: {token}"
             )
 
-# The workflow invokes v6.4 later. Append v6.6, v6.7 and v6.8 to that
-# runner-local helper file. v6.7 restores the native Media/get_photo path;
-# v6.8 hardens that legacy request builder for modern Telegram file_reference
-# lengths so it cannot overrun Telegacy 1.0.4's small stack buffers.
+# The workflow invokes v6.4 later. Append only v6.6 to that runner-local helper
+# file. v6.7/v6.8 are intentionally NOT chained: switching chat photos back to
+# the legacy native get_photo implementation caused a repeatable memcpy access
+# violation on chat open. v6.4 + v6.6 is the last known non-crashing path.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
-v67 = Path(__file__).resolve().with_name("patch_chat_media_use_native_preview_v67.py")
-v68 = Path(__file__).resolve().with_name("patch_chat_media_safe_native_preview_v68.py")
 if not v64.exists():
     raise SystemExit(f"Missing future v6.4 chat media patch: {v64}")
 if not v66.exists():
     raise SystemExit(f"Missing v6.6 media-DC retry patch: {v66}")
-if not v67.exists():
-    raise SystemExit(f"Missing v6.7 native Media preview patch: {v67}")
-if not v68.exists():
-    raise SystemExit(f"Missing v6.8 safe native Media preview patch: {v68}")
 
-chain_marker = "# chat_media_safe_native_preview_v68_chain"
+chain_marker = "# chat_media_dc_retry_v66_chain"
 v64_text = v64.read_text(encoding="utf-8")
 if chain_marker not in v64_text:
     v64_text += r'''
@@ -110,29 +105,11 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
-
-# chat_media_native_preview_v67_chain
-_chat_media_v66_subprocess.check_call(
-    [
-        sys.executable,
-        str(Path(__file__).resolve().with_name("patch_chat_media_use_native_preview_v67.py")),
-        str(root),
-    ]
-)
-
-# chat_media_safe_native_preview_v68_chain
-_chat_media_v66_subprocess.check_call(
-    [
-        sys.executable,
-        str(Path(__file__).resolve().with_name("patch_chat_media_safe_native_preview_v68.py")),
-        str(root),
-    ]
-)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
 print(
-    "Applied chat media autoload v6.5: ordinary chat photos request server images "
-    "whenever image loading is enabled; v6.4 is chained through v6.6, v6.7 and "
-    "v6.8, which restores and hardens Telegacy's native Media/get_photo queue."
+    "Applied chat media autoload v6.5 in stable mode: ordinary chat photos request "
+    "server images whenever image loading is enabled; v6.4 is chained only through "
+    "v6.6. The crashing native v6.7/v6.8 path is disabled."
 )
