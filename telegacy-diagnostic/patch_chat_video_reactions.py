@@ -93,6 +93,36 @@ if "chat_video_direct_mouse_v59" not in telegacy_cpp.read_text(
         "was not found in telegacy.cpp."
     )
 
+# Apply the small v6.5 policy-gate fix before v6.0/v6.4. This makes ordinary
+# photos request server data in every enabled image mode; v6.4 later redirects
+# those requests to the full-photo loader used for crisp chat cards.
+v65 = Path(__file__).resolve().with_name(
+    "patch_chat_media_autoload_v65.py"
+)
+
+if not v65.exists():
+    raise SystemExit(
+        f"Missing chat media autoload patch: {v65}"
+    )
+
+subprocess.check_call(
+    [
+        sys.executable,
+        str(v65),
+        str(root),
+    ],
+    cwd=str(repo_root),
+)
+
+if "chat_media_autoload_v65" not in telegacy_cpp.read_text(
+    encoding="latin-1"
+):
+    raise SystemExit(
+        "Chat media autoload v6.5 patch finished, but its marker "
+        "was not found in telegacy.cpp."
+    )
+
 print(
-    "Applied chat video/reactions v5.8 plus direct RichEdit mouse v5.9."
+    "Applied chat video/reactions v5.8, direct RichEdit mouse v5.9, and "
+    "full-photo autoload policy v6.5."
 )
