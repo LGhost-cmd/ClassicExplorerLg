@@ -96,6 +96,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_audio_video_fix.py" "telegacy-src"
 
+      - name: Fix first audio progress update and chat video playback
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_playback_start_fix.py" "telegacy-src"
+
       - name: Add Media links, fix chat list and grouped gallery
         shell: pwsh
         run: |
