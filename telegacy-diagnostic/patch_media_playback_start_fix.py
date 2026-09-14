@@ -185,23 +185,41 @@ s = replace_function(
     timer_v57,
 )
 
-old_play_request = '''                    bool media_play_request =
-                        (media_kind == 2 && !media_double_click) ||
-                        (media_kind == 1 && media_double_click);'''
-
-new_play_request = '''                    // Unified chat media cards behave like links: one click plays.
-                    // Ignore the follow-up double-click notification so video is not
-                    // opened twice after the first click has already started it.
-                    bool media_play_request =
-                        (media_kind == 2 && !media_double_click) ||
-                        (media_kind == 1 && !media_double_click);'''
-
-if old_play_request not in s:
+# The previous media patches have changed this statement a few times, so do
+# not depend on exact indentation or the exact previous right-hand side. Find
+# the one media_play_request assignment and replace that statement atomically.
+play_marker = "bool media_play_request ="
+play_start = s.find(play_marker)
+if play_start < 0:
     raise SystemExit(
-        "Could not locate Media chat click policy for the v5.7 video fix."
+        "Could not locate Media chat click policy marker for the v5.7 video fix."
     )
 
-s = s.replace(old_play_request, new_play_request, 1)
+line_start = s.rfind("\n", 0, play_start) + 1
+indent = s[line_start:play_start]
+statement_end = s.find(";", play_start)
+if statement_end < 0:
+    raise SystemExit(
+        "Could not locate the end of the Media chat click policy statement."
+    )
+statement_end += 1
+
+new_play_request = (
+    indent
+    + "// Unified chat media cards behave like links: one click plays.\n"
+    + indent
+    + "// Ignore the follow-up double-click notification so video is not\n"
+    + indent
+    + "// opened twice after the first click has already started it.\n"
+    + indent
+    + "bool media_play_request =\n"
+    + indent
+    + "    (media_kind == 2 && !media_double_click) ||\n"
+    + indent
+    + "    (media_kind == 1 && !media_double_click);"
+)
+
+s = s[:line_start] + new_play_request + s[statement_end:]
 
 write(t, s)
 
