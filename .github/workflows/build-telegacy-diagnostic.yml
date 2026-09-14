@@ -113,6 +113,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_profiles_navigation.py" "telegacy-src"
 
+      - name: Fix chat video download and add reaction menu
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_chat_video_reactions.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
