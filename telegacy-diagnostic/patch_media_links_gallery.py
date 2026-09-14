@@ -116,13 +116,45 @@ def replace_function(source, signature, replacement):
     return source[:start] + replacement + source[end:]
 
 
-# This patch intentionally layers on top of the successful Media A/V v4 build.
-if "media_tabs_av_runtime_v4" not in read(t):
+# This patch layers on top of the Media A/V patch.  Older revisions checked
+# specifically for the v4 marker, but later Media A/V revisions (v5.x) may
+# rewrite that area while retaining the APIs this patch actually needs.
+media_cpp = read(t)
+media_header = read(h)
+
+media_runtime_markers = (
+    "media_tabs_av_runtime_v4",
+    "media_tabs_av_runtime_v5",
+    "media_tabs_av_runtime_v52",
+    "media_tabs_av_runtime_v53",
+    "media_inline_audio_redraw_guard_v55",
+)
+
+media_structural_ready = (
+    "media_inline_audio_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);" in media_header
+    and "static unsigned int media_archive_filter_constructor()" in media_cpp
+    and "static void media_archive_refresh()" in media_cpp
+    and "MediaArchiveItem" in media_cpp
+)
+
+media_runtime_ready = any(
+    marker in media_cpp
+    for marker in media_runtime_markers
+)
+
+if not (media_runtime_ready or media_structural_ready):
     raise SystemExit(
-        "Media A/V v4 is not present. Run patch_media_tabs_av.py before this patch."
+        "Compatible Media A/V runtime was not found. "
+        "Run patch_media_tabs_av.py before this patch."
     )
 
-if "media_links_gallery_v1" in read(t):
+detected = next(
+    (marker for marker in reversed(media_runtime_markers) if marker in media_cpp),
+    "structural Media A/V API",
+)
+print(f"Detected compatible Media A/V base: {detected}")
+
+if "media_links_gallery_v1" in media_cpp:
     print("Media links/gallery patch already applied.")
     raise SystemExit(0)
 
@@ -134,7 +166,7 @@ s = read(h)
 
 anchor = "bool media_inline_audio_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);"
 if anchor not in s:
-    raise SystemExit("Could not locate Media v4 declarations in telegacy.h.")
+    raise SystemExit("Could not locate compatible Media A/V declarations in telegacy.h.")
 
 s = s.replace(
     anchor,
