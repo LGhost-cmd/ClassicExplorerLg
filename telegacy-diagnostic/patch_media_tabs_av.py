@@ -1,38 +1,34 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import sys
-import base64
-import json
-import subprocess
-import urllib.request
 
 if len(sys.argv) != 2:
-    raise SystemExit("Usage: patch_media_tabs_av.py <Telegacy source directory>")
+    raise SystemExit("Usage: patch_profiles_navigation.py <Telegacy source directory>")
 
 root = Path(sys.argv[1]).resolve()
 h = root / "include" / "telegacy.h"
-t = root / "src" / "telegacy.cpp"
-r = root / "src" / "response.cpp"
+p = root / "src" / "procs.cpp"
 m = root / "src" / "message.cpp"
+r = root / "src" / "response.cpp"
+helpers = root / "src" / "helpers.cpp"
 
-for p in (h, t, r, m):
-    if not p.exists():
-        raise SystemExit(f"Missing expected Telegacy file: {p}")
-
-
-def read(p):
-    return p.read_text(encoding="latin-1")
+for path in (h, p, m, r, helpers):
+    if not path.exists():
+        raise SystemExit(f"Missing expected Telegacy file: {path}")
 
 
-def write(p, s):
-    p.write_text(s, encoding="latin-1", newline="\r\n")
+def read(path):
+    return path.read_text(encoding="latin-1")
+
+
+def write(path, text):
+    path.write_text(text, encoding="latin-1", newline="\r\n")
 
 
 def function_range(source, signature):
     start = source.find(signature)
     if start < 0:
         raise SystemExit(f"Could not locate C++ function: {signature}")
-
     brace = source.find("{", start)
     if brace < 0:
         raise SystemExit(f"Could not locate opening brace: {signature}")
@@ -54,7 +50,6 @@ def function_range(source, signature):
                 in_line_comment = False
             i += 1
             continue
-
         if in_block_comment:
             if c == "*" and n == "/":
                 in_block_comment = False
@@ -62,7 +57,6 @@ def function_range(source, signature):
                 continue
             i += 1
             continue
-
         if in_string:
             if escaped:
                 escaped = False
@@ -72,7 +66,6 @@ def function_range(source, signature):
                 in_string = False
             i += 1
             continue
-
         if in_char:
             if escaped:
                 escaped = False
@@ -82,34 +75,28 @@ def function_range(source, signature):
                 in_char = False
             i += 1
             continue
-
         if c == "/" and n == "/":
             in_line_comment = True
             i += 2
             continue
-
         if c == "/" and n == "*":
             in_block_comment = True
             i += 2
             continue
-
         if c == '"':
             in_string = True
             i += 1
             continue
-
         if c == "'":
             in_char = True
             i += 1
             continue
-
         if c == "{":
             depth += 1
         elif c == "}":
             depth -= 1
             if depth == 0:
                 return start, i + 1
-
         i += 1
 
     raise SystemExit(f"Could not locate closing brace: {signature}")
@@ -120,8796 +107,1923 @@ def replace_function(source, signature, replacement):
     return source[:start] + replacement + source[end:]
 
 
-# -----------------------------------------------------------------------------
-# Single-file replacement mode.
-#
-# This file replaces the old patch_media_tabs_av.py in the repository.  It
-# first applies the exact previous v1 patch, then immediately applies v2.
-# Therefore the workflow continues to contain ONE command only:
-#
-#   python "telegacy-diagnostic\patch_media_tabs_av.py" "telegacy-src"
-#
-# The previous v1 patch is pinned by Git blob SHA so replacing this file on
-# master cannot make the bootstrap download itself recursively.
-# -----------------------------------------------------------------------------
-
-V1_BLOB_SHA = "b54ddc7af64c5a43143254c00d566c187aa609fb"
-V1_BLOB_API = (
-    "https://api.github.com/repos/LGhost-cmd/ClassicExplorerLg/git/blobs/"
-    + V1_BLOB_SHA
-)
-
-
-def load_previous_v1_patch():
-    # Fast/offline path: the old blob may already be present in the local
-    # checkout's object database.
-    try:
-        repo_root = Path(__file__).resolve().parent.parent
-
-        data = subprocess.check_output(
-            ["git", "cat-file", "blob", V1_BLOB_SHA],
-            cwd=str(repo_root),
-            stderr=subprocess.DEVNULL,
-        )
-
-        if data:
-            return data.decode("utf-8")
-    except Exception:
-        pass
-
-    # GitHub Actions has network access because the workflow already clones
-    # Telegacy and restores dependencies.  Fetch the immutable old blob rather
-    # than the current file path.
-    try:
-        request = urllib.request.Request(
-            V1_BLOB_API,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "User-Agent": "ClassicExplorerLg-Telegacy-patcher",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-
-        encoded = payload.get("content", "")
-        encoding = payload.get("encoding", "")
-
-        if encoding != "base64" or not encoded:
-            raise RuntimeError("GitHub returned an unexpected blob representation")
-
-        return base64.b64decode(encoded).decode("utf-8")
-
-    except Exception as exc:
-        raise SystemExit(
-            "Could not obtain the pinned Media A/V v1 patch "
-            f"({V1_BLOB_SHA}). Error: {exc}"
-        )
-
-
-def apply_previous_v1_if_needed():
-    if "media_tabs_av_runtime_v1" in read(t):
-        return
-
-    print(
-        "Media A/V v1 is not present; applying the pinned previous "
-        "patch_media_tabs_av.py first..."
-    )
-
-    source = load_previous_v1_patch()
-
-    namespace = {
-        "__name__": "__main__",
-        "__file__": "patch_media_tabs_av_v1_pinned.py",
-    }
-
-    try:
-        exec(
-            compile(
-                source,
-                "patch_media_tabs_av_v1_pinned.py",
-                "exec",
-            ),
-            namespace,
-            namespace,
-        )
-    except SystemExit as exc:
-        if exc.code not in (None, 0):
-            raise
-
-    if "media_tabs_av_runtime_v1" not in read(t):
-        raise SystemExit(
-            "Pinned Media A/V v1 patch finished, but its runtime marker "
-            "was not found in telegacy.cpp."
-        )
-
-
-apply_previous_v1_if_needed()
-
-s = read(t)
-if "media_tabs_av_runtime_v2" in s:
-    print("Media A/V v2 already applied.")
+# Idempotence.
+if "profile_navigation_latvianghost_v1" in read(p):
+    print("Profile navigation patch already applied.")
     raise SystemExit(0)
 
-
-# -----------------------------------------------------------------------------
-# telegacy.h: MFPlay / cross-file declarations
-# -----------------------------------------------------------------------------
-
+# =============================================================================
+# telegacy.h — cross-file declarations
+# =============================================================================
 s = read(h)
-
-s = s.replace("#define _WIN32_WINNT 0x0400", "#define _WIN32_WINNT 0x0601", 1)
-s = s.replace("#define WINVER 0x0500", "#define WINVER 0x0601", 1)
-
-if "#include <mfplay.h>" not in s:
-    anchor = "#include <dshow.h>"
-    if anchor not in s:
-        raise SystemExit("Could not locate #include <dshow.h> in telegacy.h")
-    s = s.replace(
-        anchor,
-        anchor + "\n#include <mfplay.h>\n#pragma comment(lib, \"mfplay.lib\")",
-        1,
-    )
-
-if "media_archive_preserve_on_chat_clear" not in s:
-    anchor = "void media_player_chat_download_complete(\n    const wchar_t* path\n);"
-    if anchor not in s:
-        raise SystemExit("Could not locate media_player_chat_download_complete declaration")
-    s = s.replace(
-        anchor,
-        anchor
-        + "\n\nextern bool media_archive_preserve_on_chat_clear;"
-        + "\nbool media_player_is_music_path(const wchar_t* path);"
-        + "\nbool media_inline_audio_toggle(const wchar_t* path);",
-        1,
-    )
-
-write(h, s)
-
-# pragma comment is enough for MSVC, but keep CMake explicit too.
-cmake = root / "CMakeLists.txt"
-if cmake.exists():
-    cm = cmake.read_text(encoding="utf-8")
-    if "mfplay" not in cm.lower():
-        if "    strmiids\n" in cm:
-            cm = cm.replace("    strmiids\n", "    strmiids\n    mfplay\n", 1)
-        elif "    ole32\n" in cm:
-            cm = cm.replace("    ole32\n", "    ole32\n    mfplay\n", 1)
-        cmake.write_text(cm, encoding="utf-8", newline="\n")
-
-
-# -----------------------------------------------------------------------------
-# telegacy.cpp: MFPlay-first video + inline audio + classic controls
-# -----------------------------------------------------------------------------
-
-s = read(t)
-
-player_global = "static IVideoWindow* media_player_video = NULL;"
-if player_global not in s:
-    raise SystemExit("Could not locate media_player_video global")
+anchor = "void get_pfp(DCInfo* dcInfo, Peer* peer);"
+if anchor not in s:
+    raise SystemExit("Could not locate get_pfp declaration in telegacy.h.")
 
 s = s.replace(
-    player_global,
-    player_global
-    + r'''
-
-// media_tabs_av_runtime_v2
-static IMFPMediaPlayer* media_player_mf = NULL;
-static IMFPMediaPlayer* media_inline_audio = NULL;
-static int media_player_backend = 0; // 0 none, 1 MFPlay, 2 DirectShow
-static wchar_t media_inline_audio_path[MAX_PATH] = {0};
-bool media_archive_preserve_on_chat_clear = false;
-''',
+    anchor,
+    anchor
+    + "\n\n// profile_navigation_latvianghost_v1"
+    + "\nvoid profile_nav_register_message_sender(int message_id, const BYTE* peer_id, char peer_type);"
+    + "\nvoid profile_nav_clear_message_senders();"
+    + "\nvoid profile_gallery_begin(Peer* peer, HWND picture, HWND previous, HWND next, HWND counter);"
+    + "\nvoid profile_gallery_step(int delta);"
+    + "\nvoid profile_gallery_clear();"
+    + "\nbool profile_gallery_handle_photos_response(const BYTE* request_id, BYTE* response, int length);"
+    + "\nbool profile_gallery_handle_upload(const BYTE* request_id, BYTE* response, int length);"
+    + "\nbool profile_gallery_retry_download(const BYTE* request_id, DCInfo* dcInfo);"
+    + "\nbool profile_gallery_showing_current();",
     1,
 )
-
-helper_pos = s.find("static void media_player_release_graph()")
-if helper_pos < 0:
-    raise SystemExit("Could not locate media_player_release_graph")
-
-helpers = r'''
-static HRESULT media_mf_create_player(
-    const wchar_t* path,
-    HWND video_window,
-    IMFPMediaPlayer** out_player
-) {
-    if (!path || !path[0] || !out_player)
-        return E_INVALIDARG;
-
-    *out_player = NULL;
-
-    HRESULT hr =
-        MFPCreateMediaPlayer(
-            NULL,
-            FALSE,
-            MFP_OPTION_NONE,
-            NULL,
-            video_window,
-            out_player
-        );
-
-    if (FAILED(hr) || !*out_player)
-        return FAILED(hr) ? hr : E_FAIL;
-
-    IMFPMediaItem* item = NULL;
-
-    hr =
-        (*out_player)->CreateMediaItemFromURL(
-            path,
-            TRUE,
-            0,
-            &item
-        );
-
-    if (SUCCEEDED(hr) && item)
-        hr = (*out_player)->SetMediaItem(item);
-
-    if (item)
-        item->Release();
-
-    if (FAILED(hr)) {
-        (*out_player)->Shutdown();
-        (*out_player)->Release();
-        *out_player = NULL;
-    }
-
-    return hr;
-}
-
-static void media_inline_audio_release() {
-    if (media_inline_audio) {
-        media_inline_audio->Stop();
-        media_inline_audio->Shutdown();
-        media_inline_audio->Release();
-        media_inline_audio = NULL;
-    }
-
-    media_inline_audio_path[0] = 0;
-}
-
-bool media_player_is_music_path(
-    const wchar_t* path
-) {
-    if (!path || !path[0])
-        return false;
-
-    const wchar_t* leaf = wcsrchr(path, L'\\');
-    leaf = leaf ? leaf + 1 : path;
-
-    // Don't turn Telegacy's generated voice-note files into music rows.
-    if (_wcsnicmp(leaf, L"voice", 5) == 0)
-        return false;
-
-    const wchar_t* dot = wcsrchr(leaf, L'.');
-    if (!dot)
-        return false;
-
-    return
-        _wcsicmp(dot, L".mp3") == 0 ||
-        _wcsicmp(dot, L".m4a") == 0 ||
-        _wcsicmp(dot, L".aac") == 0 ||
-        _wcsicmp(dot, L".wav") == 0 ||
-        _wcsicmp(dot, L".wma") == 0 ||
-        _wcsicmp(dot, L".ogg") == 0 ||
-        _wcsicmp(dot, L".opus") == 0 ||
-        _wcsicmp(dot, L".flac") == 0;
-}
-
-bool media_inline_audio_toggle(
-    const wchar_t* path
-) {
-    if (!media_player_is_music_path(path))
-        return false;
-
-    if (
-        media_inline_audio &&
-        media_inline_audio_path[0] &&
-        _wcsicmp(media_inline_audio_path, path) == 0
-    ) {
-        MFP_MEDIAPLAYER_STATE state = MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        if (SUCCEEDED(media_inline_audio->GetState(&state))) {
-            HRESULT hr = S_OK;
-
-            if (state == MFP_MEDIAPLAYER_STATE_PLAYING)
-                hr = media_inline_audio->Pause();
-            else
-                hr = media_inline_audio->Play();
-
-            diag_log(
-                "inline audio toggle state=%d hr=0x%08X path=%ls",
-                (int)state,
-                (unsigned int)hr,
-                path
-            );
-
-            return SUCCEEDED(hr);
-        }
-    }
-
-    media_inline_audio_release();
-    CoInitialize(NULL);
-
-    HRESULT hr =
-        media_mf_create_player(
-            path,
-            NULL,
-            &media_inline_audio
-        );
-
-    if (SUCCEEDED(hr) && media_inline_audio) {
-        media_inline_audio->SetVolume(0.85f);
-        hr = media_inline_audio->Play();
-    }
-
-    diag_log(
-        "inline audio open hr=0x%08X path=%ls",
-        (unsigned int)hr,
-        path
-    );
-
-    if (FAILED(hr) || !media_inline_audio) {
-        media_inline_audio_release();
-        return false;
-    }
-
-    wcsncpy(
-        media_inline_audio_path,
-        path,
-        ARRAYSIZE(media_inline_audio_path) - 1
-    );
-    media_inline_audio_path[ARRAYSIZE(media_inline_audio_path) - 1] = 0;
-
-    return true;
-}
-
-static bool media_player_get_time(
-    LONGLONG* position,
-    LONGLONG* duration
-) {
-    if (!position || !duration)
-        return false;
-
-    *position = 0;
-    *duration = 0;
-
-    if (media_player_backend == 1 && media_player_mf) {
-        PROPVARIANT p = {0};
-        PROPVARIANT d = {0};
-
-        HRESULT hp = media_player_mf->GetPosition(MFP_POSITIONTYPE_100NS, &p);
-        HRESULT hd = media_player_mf->GetDuration(MFP_POSITIONTYPE_100NS, &d);
-
-        if (
-            SUCCEEDED(hp) &&
-            SUCCEEDED(hd) &&
-            p.vt == VT_I8 &&
-            d.vt == VT_I8
-        ) {
-            *position = p.hVal.QuadPart;
-            *duration = d.hVal.QuadPart;
-            return *duration > 0;
-        }
-
-        return false;
-    }
-
-    if (media_player_backend == 2 && media_player_seeking) {
-        return
-            SUCCEEDED(media_player_seeking->GetCurrentPosition(position)) &&
-            SUCCEEDED(media_player_seeking->GetDuration(duration)) &&
-            *duration > 0;
-    }
-
-    return false;
-}
-
-static void media_player_set_position_v2(LONGLONG target) {
-    if (media_player_backend == 1 && media_player_mf) {
-        PROPVARIANT value = {0};
-        value.vt = VT_I8;
-        value.hVal.QuadPart = target;
-        media_player_mf->SetPosition(MFP_POSITIONTYPE_100NS, &value);
-        return;
-    }
-
-    if (media_player_backend == 2 && media_player_seeking) {
-        media_player_seeking->SetPositions(
-            &target,
-            AM_SEEKING_AbsolutePositioning,
-            NULL,
-            AM_SEEKING_NoPositioning
-        );
-    }
-}
-
-static void media_player_draw_transport(DRAWITEMSTRUCT* dis) {
-    if (!dis)
-        return;
-
-    RECT rc = dis->rcItem;
-    FillRect(dis->hDC, &rc, GetSysColorBrush(COLOR_BTNFACE));
-
-    DrawEdge(
-        dis->hDC,
-        &rc,
-        (dis->itemState & ODS_SELECTED) ? EDGE_SUNKEN : EDGE_RAISED,
-        BF_RECT
-    );
-
-    InflateRect(&rc, -7, -5);
-    if (dis->itemState & ODS_SELECTED)
-        OffsetRect(&rc, 1, 1);
-
-    COLORREF color = GetSysColor(COLOR_BTNTEXT);
-    HBRUSH brush = CreateSolidBrush(color);
-    HPEN pen = CreatePen(PS_SOLID, 1, color);
-    HGDIOBJ old_brush = SelectObject(dis->hDC, brush);
-    HGDIOBJ old_pen = SelectObject(dis->hDC, pen);
-
-    int cx = (rc.left + rc.right) / 2;
-    int cy = (rc.top + rc.bottom) / 2;
-
-    if (dis->CtlID == 10) {
-        POINT tri[3] = {
-            {cx - 5, cy - 7},
-            {cx - 5, cy + 7},
-            {cx + 7, cy}
-        };
-        Polygon(dis->hDC, tri, 3);
-    } else if (dis->CtlID == 11) {
-        Rectangle(dis->hDC, cx - 7, cy - 7, cx - 2, cy + 8);
-        Rectangle(dis->hDC, cx + 2, cy - 7, cx + 7, cy + 8);
-    } else if (dis->CtlID == 12) {
-        Rectangle(dis->hDC, cx - 6, cy - 6, cx + 7, cy + 7);
-    }
-
-    SelectObject(dis->hDC, old_pen);
-    SelectObject(dis->hDC, old_brush);
-    DeleteObject(pen);
-    DeleteObject(brush);
-}
-
-'''
-
-s = s[:helper_pos] + helpers + s[helper_pos:]
-
-release_v2 = r'''static void media_player_release_graph() {
-    if (media_player_mf) {
-        media_player_mf->Stop();
-        media_player_mf->Shutdown();
-        media_player_mf->Release();
-        media_player_mf = NULL;
-    }
-
-    if (media_player_control)
-        media_player_control->Stop();
-
-    if (media_player_video) {
-        media_player_video->put_Visible(OAFALSE);
-        media_player_video->put_Owner((OAHWND)NULL);
-        media_player_video->Release();
-        media_player_video = NULL;
-    }
-
-    if (media_player_audio) {
-        media_player_audio->Release();
-        media_player_audio = NULL;
-    }
-
-    if (media_player_seeking) {
-        media_player_seeking->Release();
-        media_player_seeking = NULL;
-    }
-
-    if (media_player_control) {
-        media_player_control->Release();
-        media_player_control = NULL;
-    }
-
-    if (media_player_graph) {
-        media_player_graph->Release();
-        media_player_graph = NULL;
-    }
-
-    media_player_backend = 0;
-}'''
-
-s = replace_function(s, "static void media_player_release_graph()", release_v2)
-
-update_v2 = r'''static void media_player_update_controls() {
-    if (!hMediaPlayerSeek)
-        return;
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    if (!media_player_get_time(&position, &duration))
-        return;
-
-    if (!media_player_user_seeking) {
-        int slider = (int)(position * 1000LL / duration);
-        SendMessageW(hMediaPlayerSeek, TBM_SETPOS, TRUE, slider);
-    }
-
-    if (hMediaPlayerTime) {
-        wchar_t now_text[32] = {0};
-        wchar_t total_text[32] = {0};
-        wchar_t combined[80] = {0};
-
-        media_player_format_time(position, now_text, ARRAYSIZE(now_text));
-        media_player_format_time(duration, total_text, ARRAYSIZE(total_text));
-
-        _snwprintf(
-            combined,
-            ARRAYSIZE(combined) - 1,
-            L"%s / %s",
-            now_text,
-            total_text
-        );
-        combined[ARRAYSIZE(combined) - 1] = 0;
-        SetWindowTextW(hMediaPlayerTime, combined);
-    }
-}'''
-
-s = replace_function(s, "static void media_player_update_controls()", update_v2)
-
-layout_v2 = r'''static void media_player_layout_video() {
-    if (media_player_backend == 1 && media_player_mf) {
-        media_player_mf->UpdateVideo();
-        return;
-    }
-
-    if (
-        media_player_backend != 2 ||
-        !media_player_video ||
-        !hMediaPlayerVideoHost
-    ) {
-        return;
-    }
-
-    RECT rc;
-    GetClientRect(hMediaPlayerVideoHost, &rc);
-    media_player_video->SetWindowPosition(0, 0, rc.right, rc.bottom);
-}'''
-
-s = replace_function(s, "static void media_player_layout_video()", layout_v2)
-
-player_window_v2 = r'''static LRESULT CALLBACK TelegacyMediaPlayerWindow(
-    HWND hwnd,
-    UINT msg,
-    WPARAM wParam,
-    LPARAM lParam
-) {
-    switch (msg) {
-        case WM_CREATE: {
-            HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-
-            hMediaPlayerVideoHost = CreateWindowExW(
-                WS_EX_CLIENTEDGE,
-                L"STATIC",
-                L"",
-                WS_CHILD | WS_VISIBLE | SS_BLACKRECT,
-                8, 8, 544, 306,
-                hwnd,
-                (HMENU)1,
-                NULL,
-                NULL
-            );
-
-            hMediaPlayerPlay = CreateWindowW(
-                L"BUTTON", L"",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                8, 324, 42, 24,
-                hwnd, (HMENU)10, NULL, NULL
-            );
-
-            hMediaPlayerPause = CreateWindowW(
-                L"BUTTON", L"",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                55, 324, 42, 24,
-                hwnd, (HMENU)11, NULL, NULL
-            );
-
-            hMediaPlayerStop = CreateWindowW(
-                L"BUTTON", L"",
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-                102, 324, 42, 24,
-                hwnd, (HMENU)12, NULL, NULL
-            );
-
-            hMediaPlayerVolume = CreateWindowExW(
-                0,
-                TRACKBAR_CLASSW,
-                L"",
-                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
-                152, 324, 160, 24,
-                hwnd, (HMENU)15, NULL, NULL
-            );
-
-            hMediaPlayerTime = CreateWindowW(
-                L"STATIC",
-                L"00:00 / 00:00",
-                WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-                398, 324, 154, 24,
-                hwnd, (HMENU)13, NULL, NULL
-            );
-
-            hMediaPlayerSeek = CreateWindowExW(
-                0,
-                TRACKBAR_CLASSW,
-                L"",
-                WS_CHILD | WS_VISIBLE | TBS_HORZ | TBS_NOTICKS,
-                8, 354, 544, 28,
-                hwnd, (HMENU)14, NULL, NULL
-            );
-
-            SendMessageW(hMediaPlayerSeek, TBM_SETRANGE, TRUE, MAKELPARAM(0, 1000));
-            SendMessageW(hMediaPlayerVolume, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
-            SendMessageW(hMediaPlayerVolume, TBM_SETPOS, TRUE, 85);
-            SendMessageW(hMediaPlayerTime, WM_SETFONT, (WPARAM)font, TRUE);
-
-            SetTimer(hwnd, MEDIA_PLAYER_TIMER, 250, NULL);
-            return 0;
-        }
-
-        case WM_SIZE: {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-
-            int client_w = rc.right - rc.left;
-            int client_h = rc.bottom - rc.top;
-            int controls_y = client_h - 84;
-            int seek_y = client_h - 48;
-
-            MoveWindow(hMediaPlayerVideoHost, 8, 8, client_w - 16, controls_y - 16, TRUE);
-            MoveWindow(hMediaPlayerPlay, 8, controls_y, 42, 24, TRUE);
-            MoveWindow(hMediaPlayerPause, 55, controls_y, 42, 24, TRUE);
-            MoveWindow(hMediaPlayerStop, 102, controls_y, 42, 24, TRUE);
-            MoveWindow(hMediaPlayerVolume, 152, controls_y, 160, 24, TRUE);
-            MoveWindow(hMediaPlayerTime, client_w - 162, controls_y, 154, 24, TRUE);
-            MoveWindow(hMediaPlayerSeek, 8, seek_y, client_w - 16, 28, TRUE);
-
-            media_player_layout_video();
-            return 0;
-        }
-
-        case WM_DRAWITEM: {
-            DRAWITEMSTRUCT* dis = (DRAWITEMSTRUCT*)lParam;
-            if (dis && (dis->CtlID == 10 || dis->CtlID == 11 || dis->CtlID == 12)) {
-                media_player_draw_transport(dis);
-                return TRUE;
-            }
-            break;
-        }
-
-        case WM_COMMAND:
-            switch (LOWORD(wParam)) {
-                case 10:
-                    if (media_player_backend == 1 && media_player_mf)
-                        media_player_mf->Play();
-                    else if (media_player_control)
-                        media_player_control->Run();
-                    return 0;
-
-                case 11:
-                    if (media_player_backend == 1 && media_player_mf)
-                        media_player_mf->Pause();
-                    else if (media_player_control)
-                        media_player_control->Pause();
-                    return 0;
-
-                case 12:
-                    if (media_player_backend == 1 && media_player_mf)
-                        media_player_mf->Stop();
-                    else if (media_player_control) {
-                        media_player_control->Stop();
-                        media_player_set_position_v2(0);
-                    }
-                    media_player_update_controls();
-                    return 0;
-            }
-            break;
-
-        case WM_HSCROLL: {
-            HWND source = (HWND)lParam;
-
-            if (source == hMediaPlayerSeek) {
-                int code = LOWORD(wParam);
-                if (code == TB_THUMBTRACK || code == TB_THUMBPOSITION || code == TB_ENDTRACK) {
-                    media_player_user_seeking = true;
-
-                    int slider = (int)SendMessageW(hMediaPlayerSeek, TBM_GETPOS, 0, 0);
-                    LONGLONG position = 0;
-                    LONGLONG duration = 0;
-
-                    if (media_player_get_time(&position, &duration))
-                        media_player_set_position_v2(duration * slider / 1000LL);
-
-                    if (code == TB_ENDTRACK || code == TB_THUMBPOSITION)
-                        media_player_user_seeking = false;
-
-                    media_player_update_controls();
-                }
-                return 0;
-            }
-
-            if (source == hMediaPlayerVolume) {
-                int value = (int)SendMessageW(hMediaPlayerVolume, TBM_GETPOS, 0, 0);
-
-                if (media_player_backend == 1 && media_player_mf) {
-                    media_player_mf->SetVolume((float)value / 100.0f);
-                } else if (media_player_audio) {
-                    long volume = value <= 0 ? -10000 : -5000 + value * 50;
-                    if (volume > 0)
-                        volume = 0;
-                    media_player_audio->put_Volume(volume);
-                }
-
-                return 0;
-            }
-
-            break;
-        }
-
-        case WM_TIMER:
-            if (wParam == MEDIA_PLAYER_TIMER) {
-                media_player_update_controls();
-                return 0;
-            }
-            break;
-
-        case WM_CLOSE:
-            DestroyWindow(hwnd);
-            return 0;
-
-        case WM_DESTROY:
-            KillTimer(hwnd, MEDIA_PLAYER_TIMER);
-            media_player_release_graph();
-
-            hMediaPlayerWindow = NULL;
-            hMediaPlayerVideoHost = NULL;
-            hMediaPlayerInfo = NULL;
-            hMediaPlayerPlay = NULL;
-            hMediaPlayerPause = NULL;
-            hMediaPlayerStop = NULL;
-            hMediaPlayerSeek = NULL;
-            hMediaPlayerVolume = NULL;
-            hMediaPlayerTime = NULL;
-            return 0;
-    }
-
-    return DefWindowProcW(hwnd, msg, wParam, lParam);
-}'''
-
-s = replace_function(s, "static LRESULT CALLBACK TelegacyMediaPlayerWindow(", player_window_v2)
-
-player_open_v2 = r'''static bool media_player_open(
-    const wchar_t* path,
-    bool video
-) {
-    if (!path || !path[0])
-        return false;
-
-    // Music never opens a separate window anymore.
-    if (!video)
-        return media_inline_audio_toggle(path);
-
-    if (hMediaPlayerWindow && IsWindow(hMediaPlayerWindow))
-        DestroyWindow(hMediaPlayerWindow);
-
-    media_player_release_graph();
-    media_player_is_video = true;
-
-    HINSTANCE instance = GetModuleHandleW(NULL);
-
-    WNDCLASSEXW wc = {0};
-    wc.cbSize = sizeof(wc);
-    wc.lpfnWndProc = TelegacyMediaPlayerWindow;
-    wc.hInstance = instance;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    wc.lpszClassName = L"TelegacyMediaPlayer98";
-
-    WNDCLASSEXW existing = {0};
-    existing.cbSize = sizeof(existing);
-
-    if (!GetClassInfoExW(instance, wc.lpszClassName, &existing)) {
-        if (!RegisterClassExW(&wc))
-            return false;
-    }
-
-    const wchar_t* leaf = wcsrchr(path, L'\\');
-    leaf = leaf ? leaf + 1 : path;
-
-    wchar_t title[360] = {0};
-    _snwprintf(
-        title,
-        ARRAYSIZE(title) - 1,
-        L"%s - Telegacy Media Player",
-        leaf
-    );
-
-    hMediaPlayerWindow = CreateWindowExW(
-        WS_EX_TOOLWINDOW,
-        wc.lpszClassName,
-        title,
-        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        600,
-        455,
-        hMain,
-        NULL,
-        instance,
-        NULL
-    );
-
-    if (!hMediaPlayerWindow)
-        return false;
-
-    CoInitialize(NULL);
-
-    HRESULT mf_hr =
-        media_mf_create_player(
-            path,
-            hMediaPlayerVideoHost,
-            &media_player_mf
-        );
-
-    if (SUCCEEDED(mf_hr) && media_player_mf) {
-        media_player_backend = 1;
-        media_player_mf->SetVolume(0.85f);
-        mf_hr = media_player_mf->Play();
-    }
-
-    diag_log(
-        "media player MFPlay hr=0x%08X path=%ls",
-        (unsigned int)mf_hr,
-        path
-    );
-
-    if (SUCCEEDED(mf_hr) && media_player_mf) {
-        media_player_layout_video();
-        media_player_update_controls();
-        SetForegroundWindow(hMediaPlayerWindow);
-        return true;
-    }
-
-    if (media_player_mf) {
-        media_player_mf->Shutdown();
-        media_player_mf->Release();
-        media_player_mf = NULL;
-    }
-
-    HRESULT ds_hr =
-        CoCreateInstance(
-            CLSID_FilterGraph,
-            NULL,
-            CLSCTX_INPROC_SERVER,
-            IID_IGraphBuilder,
-            (void**)&media_player_graph
-        );
-
-    if (SUCCEEDED(ds_hr) && media_player_graph)
-        ds_hr = media_player_graph->RenderFile(path, NULL);
-
-    diag_log(
-        "media player DirectShow fallback hr=0x%08X path=%ls",
-        (unsigned int)ds_hr,
-        path
-    );
-
-    if (SUCCEEDED(ds_hr) && media_player_graph) {
-        media_player_graph->QueryInterface(IID_IMediaControl, (void**)&media_player_control);
-        media_player_graph->QueryInterface(IID_IMediaSeeking, (void**)&media_player_seeking);
-        media_player_graph->QueryInterface(IID_IBasicAudio, (void**)&media_player_audio);
-        media_player_graph->QueryInterface(IID_IVideoWindow, (void**)&media_player_video);
-
-        media_player_backend = 2;
-
-        if (media_player_video && hMediaPlayerVideoHost) {
-            media_player_video->put_Owner((OAHWND)hMediaPlayerVideoHost);
-            media_player_video->put_WindowStyle(WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
-            media_player_video->put_Visible(OATRUE);
-        }
-
-        if (media_player_audio)
-            media_player_audio->put_Volume(-750);
-
-        if (media_player_control)
-            media_player_control->Run();
-
-        media_player_layout_video();
-        media_player_update_controls();
-        SetForegroundWindow(hMediaPlayerWindow);
-        return true;
-    }
-
-    wchar_t error[420] = {0};
-    _snwprintf(
-        error,
-        ARRAYSIZE(error) - 1,
-        L"Windows could not decode this video.\r\n\r\nMedia Foundation: 0x%08X\r\nDirectShow: 0x%08X",
-        (unsigned int)mf_hr,
-        (unsigned int)ds_hr
-    );
-
-    MessageBoxW(
-        hMediaPlayerWindow,
-        error,
-        L"Telegacy Media Player",
-        MB_OK | MB_ICONERROR
-    );
-
-    DestroyWindow(hMediaPlayerWindow);
-    return false;
-}'''
-
-s = replace_function(s, "static bool media_player_open(", player_open_v2)
-
-kind_v2 = r'''static int media_player_kind_from_path(
-    const wchar_t* path
-) {
-    if (!path || !path[0])
-        return 0;
-
-    const wchar_t* dot = wcsrchr(path, L'.');
-    if (!dot)
-        return 0;
-
-    if (
-        _wcsicmp(dot, L".mp4") == 0 ||
-        _wcsicmp(dot, L".m4v") == 0 ||
-        _wcsicmp(dot, L".mov") == 0 ||
-        _wcsicmp(dot, L".avi") == 0 ||
-        _wcsicmp(dot, L".mkv") == 0 ||
-        _wcsicmp(dot, L".webm") == 0 ||
-        _wcsicmp(dot, L".wmv") == 0
-    ) {
-        return 1;
-    }
-
-    if (media_player_is_music_path(path))
-        return 2;
-
-    return 0;
-}'''
-
-s = replace_function(s, "static int media_player_kind_from_path(", kind_v2)
-
-try_chat_v2 = r'''static bool media_player_try_open_chat_path(
-    const wchar_t* path
-) {
-    int kind = media_player_kind_from_path(path);
-
-    if (!kind)
-        return false;
-
-    media_chat_autoplay_path[0] = 0;
-    media_chat_autoplay_kind = 0;
-
-    if (kind == 2)
-        return media_inline_audio_toggle(path);
-
-    return media_player_open(path, true);
-}'''
-
-s = replace_function(s, "static bool media_player_try_open_chat_path(", try_chat_v2)
-
-chat_complete_v2 = r'''void media_player_chat_download_complete(
-    const wchar_t* path
-) {
-    if (
-        !path ||
-        !path[0] ||
-        !media_chat_autoplay_path[0] ||
-        media_chat_autoplay_kind == 0 ||
-        _wcsicmp(path, media_chat_autoplay_path) != 0
-    ) {
-        return;
-    }
-
-    int kind = media_chat_autoplay_kind;
-    media_chat_autoplay_path[0] = 0;
-    media_chat_autoplay_kind = 0;
-
-    if (kind == 2)
-        media_inline_audio_toggle(path);
-    else if (kind == 1)
-        media_player_open(path, true);
-}'''
-
-s = replace_function(s, "void media_player_chat_download_complete(", chat_complete_v2)
-
-# Prevent a Media jump from destroying the gallery cache.
-clear_v2 = r'''void message_search_clear_chat_view() {
-    for (int i = (int)documents.size() - 1; i >= 0; i--) {
-        free(documents[i].filename);
-        free(documents[i].file_reference);
-    }
-
-    documents.clear();
-
-    for (int i = (int)links.size() - 1; i >= 0; i--)
-        free(links[i].lpstrText);
-
-    links.clear();
-    messages.clear();
-
-    memset(group_id_tofront, 0, sizeof(group_id_tofront));
-    memset(group_id, 0, sizeof(group_id));
-
-    if (chat)
-        SendMessageW(chat, WM_SETTEXT, 0, (LPARAM)L"");
-
-    if (!media_archive_preserve_on_chat_clear)
-        media_archive_clear();
-}'''
-
-s = replace_function(s, "void message_search_clear_chat_view()", clear_v2)
-
-# Make the already-existing refresh less destructive visually.
-refresh_start, refresh_end = function_range(s, "static void media_archive_refresh() {")
-refresh_func = s[refresh_start:refresh_end]
-refresh_func = refresh_func.replace("RDW_ERASE |\n", "")
-refresh_func = refresh_func.replace("RDW_ERASE |\r\n", "")
-s = s[:refresh_start] + refresh_func + s[refresh_end:]
-
-write(t, s)
-
-
-# -----------------------------------------------------------------------------
-# response.cpp: preserve Media on jump + request video document thumbnails
-# -----------------------------------------------------------------------------
-
-s = read(r)
-
-jump_start, jump_end = function_range(s, "static void media_archive_handle_jump_response(")
-jump_func = s[jump_start:jump_end]
-
-old = "    message_search_clear_chat_view();"
-if old not in jump_func:
-    raise SystemExit("Could not locate chat clear inside Media jump response")
-
-jump_func = jump_func.replace(
-    old,
-    "    media_archive_preserve_on_chat_clear = true;\n"
-    "    message_search_clear_chat_view();\n"
-    "    media_archive_preserve_on_chat_clear = false;",
-    1,
-)
-s = s[:jump_start] + jump_func + s[jump_end:]
-
-# Document flags bit 0 means thumbs are present in the Document constructor.
-parser_start, parser_end = function_range(s, "static bool media_tabs_extract_document(")
-parser = s[parser_start:parser_end]
-
-old = "    document->photo_size = 0;"
-if old in parser:
-    parser = parser.replace(
-        old,
-        "    document->photo_size =\n"
-        "        (kind == 1 && (doc_flags & (1 << 0))) ? 2 : 0;",
-        1,
-    )
-
-s = s[:parser_start] + parser + s[parser_end:]
-write(r, s)
-
-
-# -----------------------------------------------------------------------------
-# message.cpp: music gets a compact inline Win98-ish play row
-# -----------------------------------------------------------------------------
-
-s = read(m)
-
-if "media_inline_music_row_v2" not in s:
-    old = "\t\tbool voice = false, gif = false, round = false, sticker = false;"
-    if old not in s:
-        raise SystemExit("Could not locate document media flags in message.cpp")
-
-    s = s.replace(
-        old,
-        "\t\tbool voice = false, gif = false, round = false, sticker = false, music = false; // media_inline_music_row_v2",
-        1,
-    )
-
-    old = "\t\t\t\t\t\tvoice = (att_flags & (1 << 10)) ? true : false;"
-    if old not in s:
-        raise SystemExit("Could not locate DocumentAttributeAudio voice flag")
-
-    s = s.replace(old, old + "\n\t\t\t\t\t\tmusic = !voice;", 1)
-
-    old = (
-        "\t\t\tdocument.min = cr_startmsg.cpMin + written;\n"
-        "\t\t\twritten += riched_write(chat, document.filename);\n"
-        "\t\t\tdocument.max = cr_startmsg.cpMin + written;\n"
-        "\t\t\tif (duration_str[0] == ' ') written += riched_write(chat, &duration_str[0]);\n"
-        "\t\t\twritten += riched_write(chat, &size_str[0]);"
-    )
-
-    new = (
-        "\t\t\tdocument.min = cr_startmsg.cpMin + written;\n"
-        "\t\t\tif (music) written += riched_write(chat, L\"[>] \" );\n"
-        "\t\t\twritten += riched_write(chat, document.filename);\n"
-        "\t\t\tif (duration_str[0] == ' ') written += riched_write(chat, &duration_str[0]);\n"
-        "\t\t\twritten += riched_write(chat, &size_str[0]);\n"
-        "\t\t\tdocument.max = cr_startmsg.cpMin + written;"
-    )
-
-    if old not in s:
-        raise SystemExit("Could not locate document row rendering block")
-
-    s = s.replace(old, new, 1)
-
-write(m, s)
-
-
-# -----------------------------------------------------------------------------
-# Chat click behavior: one click on music; double click on video.
-# This is deliberately a small textual rewrite so the v1 download machinery stays.
-# -----------------------------------------------------------------------------
-
-s = read(t)
-
-queue_old = '''\t\t\t\t\tif (\n\t\t\t\t\t\tmedia_double_click &&\n\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0\n\t\t\t\t\t) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n'''
-
-if queue_old in s:
-    queue_new = '''\t\t\t\t\tint media_kind = media_player_kind_from_path(documents[i].filename);\n\t\t\t\t\tbool media_play_request =\n\t\t\t\t\t\t(media_kind == 2 && !media_double_click) ||\n\t\t\t\t\t\t(media_kind == 1 && media_double_click);\n\n\t\t\t\t\tif (media_play_request) {\n\t\t\t\t\t\tmedia_player_queue_chat_autoplay(\n\t\t\t\t\t\t\tdocuments[i].filename\n\t\t\t\t\t\t);\n\t\t\t\t\t}\n'''
-    s = s.replace(queue_old, queue_new, 1)
-
-    # Existing v1 has two guards that prevent an in-progress double-click from
-    # cancelling its own download. Extend those guards to music single-click.
-    s = s.replace(
-        "media_double_click &&\n\t\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0",
-        "media_play_request",
-        1,
-    )
-    s = s.replace(
-        "media_double_click &&\n\t\t\t\t\t\t\t\tmedia_player_kind_from_path(documents[i].filename) != 0",
-        "media_play_request",
-        1,
-    )
-
-    open_old = '''\t\t\t\t\t\t} else if (media_double_click) {\n\t\t\t\t\t\t\tif (!media_player_try_open_chat_path(documents[i].filename)) {\n\t\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n'''
-
-    open_new = '''\t\t\t\t\t\t} else if (media_play_request) {\n\t\t\t\t\t\t\tmedia_player_try_open_chat_path(documents[i].filename);\n\t\t\t\t\t\t} else if (media_double_click && media_kind == 0) {\n\t\t\t\t\t\t\tif ((INT_PTR)ShellExecute(NULL, L"open", documents[i].filename, NULL, NULL, SW_SHOWNORMAL) <= 32) {\n\t\t\t\t\t\t\t\twchar_t cmd[MAX_PATH * 2];\n\t\t\t\t\t\t\t\tswprintf(cmd, L"shell32.dll,OpenAs_RunDLL %s", documents[i].filename);\n\t\t\t\t\t\t\t\tShellExecute(NULL, L"open", L"rundll32.exe", cmd, NULL, SW_SHOWNORMAL);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n'''
-
-    if open_old in s:
-        s = s.replace(open_old, open_new, 1)
-
-write(t, s)
-
-
-# -----------------------------------------------------------------------------
-# Final diagnostics / marker
-# -----------------------------------------------------------------------------
-
-s = read(t)
-if "media_tabs_av_runtime_v2" not in s:
-    raise SystemExit("Media v2 marker missing after patch")
-
-for token in (
-    "MFPCreateMediaPlayer",
-    "media_inline_audio_toggle",
-    "media_archive_preserve_on_chat_clear",
-    "BS_OWNERDRAW",
-):
-    if token not in s:
-        raise SystemExit(f"Media v2 verification failed: {token}")
-
-print(
-    "Applied Media A/V v2: MFPlay-first video, DirectShow fallback, "
-    "inline chat music, classic transport buttons, Media state preservation, "
-    "and reduced redraw/flicker."
-)
-
-
-# =============================================================================
-# Media A/V v3.1 (compile-order fixes)
-# - truly atomic Media page swaps (no empty-page flash / per-thumb repaint)
-# - full-size photo download on double click (not the cached preview)
-# - Telegram document thumbnails for video in Media and in the chat
-# - visible two-line inline music player with live progress
-# - keep Media contents intact while jumping to a message
-# =============================================================================
-
-g = root / "src" / "helpers.cpp"
-if not g.exists():
-    raise SystemExit(f"Missing expected Telegacy file: {g}")
-
-# -----------------------------------------------------------------------------
-# telegacy.h declarations
-# -----------------------------------------------------------------------------
-
-s = read(h)
-
-if "media_tabs_av_v3" not in s:
-    anchor = "bool media_inline_audio_toggle(const wchar_t* path);"
-    if anchor not in s:
-        raise SystemExit("Could not locate Media v2 declarations in telegacy.h")
-
-    s = s.replace(
-        anchor,
-        anchor
-        + "\nstruct DCInfo;"
-        + "\nvoid media_archive_request_video_thumbnail(Document* document, DCInfo* dcInfo);"
-        + "\nbool media_archive_handle_full_photo_upload(const BYTE* rpc_id, BYTE* response, int length);"
-        + "\n// media_tabs_av_v3",
-        1,
-    )
-
 write(h, s)
 
+# =============================================================================
+# helpers.cpp — user avatar history via photos.getUserPhotos + upload.getFile
+# =============================================================================
+s = read(helpers)
+insert_pos = s.find("void get_pfp(DCInfo* dcInfo, Peer* peer) {")
+if insert_pos < 0:
+    raise SystemExit("Could not locate get_pfp definition in helpers.cpp.")
 
-# -----------------------------------------------------------------------------
-# helpers.cpp: photo_size == 3 is our JPEG document-thumbnail sentinel.
-# It must use inputDocumentFileLocation, like stickers, but is decoded as JPEG
-# by response.cpp because only photo_size == 1 takes the WebP sticker path.
-# -----------------------------------------------------------------------------
+helpers_code = r'''
+// profile_navigation_latvianghost_v1
+struct TelegacyProfileGalleryPhoto {
+    BYTE id[8];
+    BYTE access_hash[8];
+    BYTE* file_reference;
+    int dc;
+    char thumb_type;
+};
 
-s = read(g)
+static std::vector<TelegacyProfileGalleryPhoto> profile_gallery_photos;
+static Peer* profile_gallery_peer = NULL;
+static HWND profile_gallery_picture = NULL;
+static HWND profile_gallery_previous = NULL;
+static HWND profile_gallery_next = NULL;
+static HWND profile_gallery_counter = NULL;
+static int profile_gallery_index = 0;
+static bool profile_gallery_active = false;
+static bool profile_gallery_loading = false;
+static BYTE profile_gallery_list_msgid[8] = {0};
+static BYTE profile_gallery_file_msgid[8] = {0};
 
-old = "(rce || document->photo_size == 1) ? 0xbad07584 : 0x40181ffe"
-new = "(rce || document->photo_size == 1 || document->photo_size == 3) ? 0xbad07584 : 0x40181ffe"
-
-if old in s:
-    s = s.replace(old, new, 1)
-elif new not in s:
-    raise SystemExit("Could not locate input file-location selection in get_photo().")
-
-write(g, s)
-
-
-# -----------------------------------------------------------------------------
-# telegacy.cpp
-# -----------------------------------------------------------------------------
-
-s = read(t)
-
-if "media_tabs_av_runtime_v3" not in s:
-    # Extend MediaArchiveItem. Images now keep the original Photo location too,
-    # while bitmap remains only the lightweight preview used by the grid.
-    struct_old = r'''struct MediaArchiveItem {
-    __int64 document_id;
-    int message_id;
-    int page_index;
-    HBITMAP bitmap;
-    wchar_t file_path[MAX_PATH];
-
-    // media_tabs_av_runtime_v1
-    int media_kind;        // 0 image, 1 video, 2 music
-    int duration;
-    bool has_document;
-    Document av_document;
-    wchar_t display_name[260];
-};'''
-
-    struct_new = r'''struct MediaArchiveItem {
-    __int64 document_id;
-    int message_id;
-    int page_index;
-    HBITMAP bitmap;
-    wchar_t file_path[MAX_PATH];
-
-    // media_tabs_av_runtime_v1
-    int media_kind;        // 0 image, 1 video, 2 music
-    int duration;
-    bool has_document;
-    bool full_file_ready;  // media_tabs_av_runtime_v3
-    Document av_document;
-    wchar_t display_name[260];
-};'''
-
-    if struct_old not in s:
-        raise SystemExit("Could not locate MediaArchiveItem v1/v2 layout.")
-
-    s = s.replace(struct_old, struct_new, 1)
-
-    global_anchor = "bool media_archive_preserve_on_chat_clear = false;"
-    if global_anchor not in s:
-        raise SystemExit("Could not locate Media v2 globals.")
-
-    globals_v3 = r'''
-
-// media_tabs_av_runtime_v3
-static int media_full_photo_pending_item = -1;
-static LONGLONG media_full_photo_offset = 0;
-static BYTE media_full_photo_rpc_id[8] = {0};
-static wchar_t media_full_photo_path[MAX_PATH] = {0};
-
-static UINT_PTR media_inline_audio_timer = 0;
-static int media_inline_audio_last_second = -1;
-'''
-
-    s = s.replace(global_anchor, global_anchor + globals_v3, 1)
-
-    # Forward declaration because add_document() occurs after the Media window
-    # helpers and calls this when the last preview arrives.
-    forward_anchor = r'''static bool media_archive_request_server_page(
-    int offset_id
-);'''
-    if forward_anchor not in s:
-        raise SystemExit("Could not locate Media request forward declaration.")
-
-    s = s.replace(
-        forward_anchor,
-        forward_anchor
-        + "\n\nstatic bool media_archive_server_queue_empty();"
-        + "\nstatic void media_archive_update_nav();"
-        + "\nstatic void media_archive_commit_ready_page();",
-        1,
-    )
-
-    # -------------------------------------------------------------------------
-    # Video document thumbnail request + full Photo downloader + inline audio UI
-    # -------------------------------------------------------------------------
-
-    insert_at = s.find("static void media_player_release_graph()")
-    if insert_at < 0:
-        raise SystemExit("Could not locate player helper insertion point.")
-
-    helpers_v3 = r'''
-static void media_archive_shell_open(
-    const wchar_t* path
-) {
-    if (!path || !path[0])
-        return;
-
-    HINSTANCE result =
-        ShellExecuteW(
-            hMediaArchiveWindow
-                ? hMediaArchiveWindow
-                : hMain,
-            L"open",
-            path,
-            NULL,
-            NULL,
-            SW_SHOWNORMAL
-        );
-
-    if ((INT_PTR)result <= 32)
-        MessageBeep(MB_ICONASTERISK);
+static void profile_gallery_free_entries() {
+    for (int i = 0; i < (int)profile_gallery_photos.size(); i++) {
+        free(profile_gallery_photos[i].file_reference);
+        profile_gallery_photos[i].file_reference = NULL;
+    }
+    profile_gallery_photos.clear();
 }
 
-void media_archive_request_video_thumbnail(
-    Document* document,
-    DCInfo* dcInfo
-) {
-    if (
-        !document ||
-        !dcInfo ||
-        !document->file_reference
-    ) {
-        return;
-    }
+static void profile_gallery_update_controls() {
+    int count = (int)profile_gallery_photos.size();
+    bool multiple = profile_gallery_active && count > 1;
 
-    BYTE unenc_query[192] = {0};
-    BYTE enc_query[216] = {0};
-
-    internal_header(
-        dcInfo,
-        unenc_query,
-        true
-    );
-
-    memcpy(
-        document->photo_msg_id,
-        unenc_query + 16,
-        8
-    );
-
-    // upload.getFile#be5335be
-    write_le(unenc_query + 32, 0xbe5335be, 4);
-    write_le(unenc_query + 36, 0, 4);
-
-    // inputDocumentFileLocation#bad07584
-    write_le(unenc_query + 40, 0xbad07584, 4);
-    memcpy(unenc_query + 44, document->id, 8);
-    memcpy(unenc_query + 52, document->access_hash, 8);
-
-    int file_ref_len =
-        tlstr_len(
-            document->file_reference,
-            true
+    if (profile_gallery_previous) {
+        ShowWindow(profile_gallery_previous, multiple ? SW_SHOW : SW_HIDE);
+        EnableWindow(
+            profile_gallery_previous,
+            multiple && !profile_gallery_loading && profile_gallery_index > 0
         );
-
-    if (
-        file_ref_len <= 0 ||
-        60 + file_ref_len + 16 >
-            (int)sizeof(unenc_query)
-    ) {
-        memset(document->photo_msg_id, 0, 8);
-        return;
     }
 
-    memcpy(
-        unenc_query + 60,
-        document->file_reference,
-        file_ref_len
-    );
-
-    int offset = 60 + file_ref_len;
-
-    // thumb_size:string = "m"
-    memset(unenc_query + offset, 0, 12);
-    unenc_query[offset] = 1;
-    unenc_query[offset + 1] = 'm';
-    offset += 12; // 4-byte TL string + offset:long(0)
-
-    write_le(unenc_query + offset, 1048576, 4);
-    offset += 4;
-
-    write_le(unenc_query + 28, offset - 32, 4);
-
-    int padding_len = get_padding(offset);
-    fortuna_read(unenc_query + offset, padding_len, &prng);
-    offset += padding_len;
-
-    if (!convert_message(dcInfo, unenc_query, enc_query, offset, 0)) {
-        memset(document->photo_msg_id, 0, 8);
-        return;
-    }
-
-    send_query(
-        dcInfo,
-        enc_query,
-        offset + 24
-    );
-}
-
-static bool media_archive_send_full_photo_chunk() {
-    if (
-        media_full_photo_pending_item < 0 ||
-        media_full_photo_pending_item >=
-            (int)media_archive_items.size()
-    ) {
-        return false;
-    }
-
-    MediaArchiveItem* item =
-        &media_archive_items[
-            media_full_photo_pending_item
-        ];
-
-    if (
-        item->media_kind != 0 ||
-        !item->has_document ||
-        !item->av_document.file_reference ||
-        item->av_document.photo_size <= 1
-    ) {
-        return false;
-    }
-
-    BYTE unenc_query[192] = {0};
-    BYTE enc_query[216] = {0};
-
-    internal_header(
-        unenc_query,
-        true
-    );
-
-    memcpy(
-        media_full_photo_rpc_id,
-        unenc_query + 16,
-        8
-    );
-
-    // upload.getFile#be5335be
-    write_le(unenc_query + 32, 0xbe5335be, 4);
-    write_le(unenc_query + 36, 0, 4);
-
-    // inputPhotoFileLocation#40181ffe
-    write_le(unenc_query + 40, 0x40181ffe, 4);
-    memcpy(unenc_query + 44, item->av_document.id, 8);
-    memcpy(unenc_query + 52, item->av_document.access_hash, 8);
-
-    int file_ref_len =
-        tlstr_len(
-            item->av_document.file_reference,
-            true
+    if (profile_gallery_next) {
+        ShowWindow(profile_gallery_next, multiple ? SW_SHOW : SW_HIDE);
+        EnableWindow(
+            profile_gallery_next,
+            multiple && !profile_gallery_loading && profile_gallery_index + 1 < count
         );
-
-    if (
-        file_ref_len <= 0 ||
-        60 + file_ref_len + 16 >
-            (int)sizeof(unenc_query)
-    ) {
-        return false;
     }
 
-    memcpy(
-        unenc_query + 60,
-        item->av_document.file_reference,
-        file_ref_len
-    );
-
-    int offset = 60 + file_ref_len;
-
-    // thumb_size:string = the largest size found in the Telegram Photo object.
-    memset(unenc_query + offset, 0, 12);
-    unenc_query[offset] = 1;
-    unenc_query[offset + 1] =
-        (BYTE)item->av_document.photo_size;
-
-    // upload.getFile offset:long follows the padded 4-byte TL string.
-    write_le(
-        unenc_query + offset + 4,
-        media_full_photo_offset,
-        8
-    );
-
-    offset += 12;
-
-    write_le(unenc_query + offset, 1048576, 4);
-    offset += 4;
-
-    write_le(unenc_query + 28, offset - 32, 4);
-
-    int padding_len = get_padding(offset);
-    fortuna_read(unenc_query + offset, padding_len, &prng);
-    offset += padding_len;
-
-    if (!convert_message(
-        unenc_query,
-        enc_query,
-        offset,
-        0
-    )) {
-        return false;
-    }
-
-    int sent =
-        send_query(
-            enc_query,
-            offset + 24
-        );
-
-    diag_log(
-        "media full photo request item=%d size=%c offset=%I64d sent=%d",
-        media_full_photo_pending_item,
-        item->av_document.photo_size,
-        media_full_photo_offset,
-        sent
-    );
-
-    return sent > 0;
-}
-
-static bool media_archive_begin_full_photo_download(
-    int item_index
-) {
-    if (
-        item_index < 0 ||
-        item_index >=
-            (int)media_archive_items.size()
-    ) {
-        return false;
-    }
-
-    MediaArchiveItem* item =
-        &media_archive_items[item_index];
-
-    if (item->media_kind != 0)
-        return false;
-
-    if (
-        item->full_file_ready &&
-        item->file_path[0] &&
-        GetFileAttributesW(item->file_path) !=
-            INVALID_FILE_ATTRIBUTES
-    ) {
-        media_archive_shell_open(item->file_path);
-        return true;
-    }
-
-    if (
-        !item->has_document ||
-        !item->av_document.file_reference ||
-        item->av_document.photo_size <= 1
-    ) {
-        // Fallback only for legacy/cached entries that don't have the Photo
-        // location metadata. Never intentionally prefer the grid thumbnail.
-        if (item->file_path[0]) {
-            media_archive_shell_open(item->file_path);
-            return true;
+    if (profile_gallery_counter) {
+        if (multiple) {
+            wchar_t text[40] = {0};
+            swprintf(text, L"%d / %d", profile_gallery_index + 1, count);
+            SetWindowTextW(profile_gallery_counter, text);
+            ShowWindow(profile_gallery_counter, SW_SHOW);
+        } else {
+            ShowWindow(profile_gallery_counter, SW_HIDE);
         }
+    }
+}
+
+void profile_gallery_clear() {
+    profile_gallery_free_entries();
+    profile_gallery_peer = NULL;
+    profile_gallery_picture = NULL;
+    profile_gallery_previous = NULL;
+    profile_gallery_next = NULL;
+    profile_gallery_counter = NULL;
+    profile_gallery_index = 0;
+    profile_gallery_active = false;
+    profile_gallery_loading = false;
+    memset(profile_gallery_list_msgid, 0, sizeof(profile_gallery_list_msgid));
+    memset(profile_gallery_file_msgid, 0, sizeof(profile_gallery_file_msgid));
+}
+
+static void profile_gallery_request_list(Peer* peer) {
+    if (!peer || peer->type != 0)
+        return;
+
+    BYTE unenc_query[112] = {0};
+    BYTE enc_query[136] = {0};
+
+    internal_header(unenc_query, true);
+    memcpy(profile_gallery_list_msgid, unenc_query + 16, 8);
+
+    write_le(unenc_query + 32, 0x91cd32a8, 4); // photos.getUserPhotos
+    int offset = 36;
+    offset += place_peer(unenc_query + offset, peer, false); // InputUser
+    write_le(unenc_query + offset, 0, 4); // offset
+    offset += 4;
+    memset(unenc_query + offset, 0, 8); // max_id:long
+    offset += 8;
+    write_le(unenc_query + offset, 50, 4); // enough for a useful gallery
+    offset += 4;
+
+    write_le(unenc_query + 28, offset - 32, 4);
+    int padding = get_padding(offset);
+    fortuna_read(unenc_query + offset, padding, &prng);
+    offset += padding;
+
+    convert_message(unenc_query, enc_query, offset, 0);
+    send_query(enc_query, offset + 24);
+}
+
+void profile_gallery_begin(
+    Peer* peer,
+    HWND picture,
+    HWND previous,
+    HWND next,
+    HWND counter
+) {
+    profile_gallery_clear();
+
+    if (!peer || peer->type != 0)
+        return;
+
+    profile_gallery_peer = peer;
+    profile_gallery_picture = picture;
+    profile_gallery_previous = previous;
+    profile_gallery_next = next;
+    profile_gallery_counter = counter;
+    profile_gallery_active = true;
+    profile_gallery_index = 0;
+
+    profile_gallery_update_controls();
+    profile_gallery_request_list(peer);
+}
+
+static bool profile_gallery_parse_photo(
+    BYTE* photo,
+    TelegacyProfileGalleryPhoto* out
+) {
+    if (!photo || !out)
         return false;
+
+    unsigned int constructor = (unsigned int)read_le(photo, 4);
+    if (constructor == 0x2331b22d) // photoEmpty
+        return false;
+
+    int total = photo_offset(photo);
+    if (total < 36)
+        return false;
+
+    memset(out, 0, sizeof(*out));
+    memcpy(out->id, photo + 8, 8);
+    memcpy(out->access_hash, photo + 16, 8);
+
+    int file_ref_len = tlstr_len(photo + 24, true);
+    if (file_ref_len <= 0 || file_ref_len > total - 24)
+        return false;
+
+    out->file_reference = (BYTE*)malloc(file_ref_len);
+    if (!out->file_reference)
+        return false;
+
+    memcpy(out->file_reference, photo + 24, file_ref_len);
+    out->dc = (int)read_le(photo + total - 4, 4);
+    out->thumb_type = 0;
+
+    int offset = 24 + file_ref_len;
+    if (offset + 12 <= total) {
+        offset += 4; // date
+
+        if ((unsigned int)read_le(photo + offset, 4) == 0x1cb5c415) {
+            int count = (int)read_le(photo + offset + 4, 4);
+            offset += 8;
+
+            int best_area = -1;
+            char best_type = 0;
+            bool found_medium = false;
+
+            for (int i = 0; i < count && offset + 8 < total; i++) {
+                BYTE* size = photo + offset;
+                unsigned int size_constructor = (unsigned int)read_le(size, 4);
+                int size_len = photo_video_size_offset(size, true, false, false);
+                if (size_len <= 0 || offset + size_len > total)
+                    break;
+
+                char type = 0;
+                BYTE* type_string = size + 4;
+                if (type_string[0] == 1)
+                    type = (char)type_string[1];
+
+                int width = 0;
+                int height = 0;
+                int q = 4 + tlstr_len(type_string, true);
+
+                if (
+                    size_constructor == 0x75c78e60 || // photoSize
+                    size_constructor == 0x21e1ad6 ||  // photoCachedSize
+                    size_constructor == 0xfa3efb95    // photoSizeProgressive
+                ) {
+                    width = (int)read_le(size + q, 4);
+                    height = (int)read_le(size + q + 4, 4);
+                }
+
+                if (type == 'm') {
+                    best_type = type;
+                    found_medium = true;
+                } else if (!found_medium && type) {
+                    int area = width > 0 && height > 0 ? width * height : 0;
+                    if (area >= best_area) {
+                        best_area = area;
+                        best_type = type;
+                    }
+                }
+
+                offset += size_len;
+            }
+
+            out->thumb_type = best_type ? best_type : 'm';
+        }
     }
 
-    if (media_full_photo_pending_item >= 0) {
-        MessageBeep(MB_ICONASTERISK);
-        return false;
-    }
-
-    wchar_t temp_dir[MAX_PATH] = {0};
-    DWORD len =
-        GetTempPathW(
-            ARRAYSIZE(temp_dir),
-            temp_dir
-        );
-
-    if (!len || len >= ARRAYSIZE(temp_dir))
-        return false;
-
-    if (wcslen(temp_dir) + 16 >= ARRAYSIZE(temp_dir))
-        return false;
-
-    wcscat(temp_dir, L"TelegacyMedia");
-    CreateDirectoryW(temp_dir, NULL);
-
-    _snwprintf(
-        media_full_photo_path,
-        ARRAYSIZE(media_full_photo_path) - 1,
-        L"%s\\photo_%016I64X.jpg",
-        temp_dir,
-        item->document_id
-    );
-    media_full_photo_path[
-        ARRAYSIZE(media_full_photo_path) - 1
-    ] = 0;
-
-    DeleteFileW(media_full_photo_path);
-
-    media_full_photo_pending_item = item_index;
-    media_full_photo_offset = 0;
-    memset(media_full_photo_rpc_id, 0, 8);
-
-    if (!media_archive_send_full_photo_chunk()) {
-        media_full_photo_pending_item = -1;
-        media_full_photo_path[0] = 0;
-        return false;
-    }
+    if (!out->thumb_type)
+        out->thumb_type = 'm';
 
     return true;
 }
 
-bool media_archive_handle_full_photo_upload(
-    const BYTE* rpc_id,
+static bool profile_gallery_request_selected(DCInfo* dcInfo) {
+    if (
+        !profile_gallery_active ||
+        !dcInfo ||
+        profile_gallery_index < 0 ||
+        profile_gallery_index >= (int)profile_gallery_photos.size()
+    ) {
+        return false;
+    }
+
+    TelegacyProfileGalleryPhoto* photo =
+        &profile_gallery_photos[profile_gallery_index];
+
+    BYTE unenc_query[160] = {0};
+    BYTE enc_query[184] = {0};
+    internal_header(dcInfo, unenc_query, true);
+    memcpy(profile_gallery_file_msgid, unenc_query + 16, 8);
+
+    write_le(unenc_query + 32, 0xbe5335be, 4); // upload.getFile
+    write_le(unenc_query + 36, 0, 4);          // flags
+    write_le(unenc_query + 40, 0x40181ffe, 4); // inputPhotoFileLocation
+    memcpy(unenc_query + 44, photo->id, 8);
+    memcpy(unenc_query + 52, photo->access_hash, 8);
+
+    int ref_len = tlstr_len(photo->file_reference, true);
+    memcpy(unenc_query + 60, photo->file_reference, ref_len);
+    int offset = 60 + ref_len;
+
+    memset(unenc_query + offset, 0, 4);
+    unenc_query[offset] = 1;
+    unenc_query[offset + 1] = photo->thumb_type;
+    offset += 4;
+
+    memset(unenc_query + offset, 0, 8); // offset:long
+    offset += 8;
+    write_le(unenc_query + offset, 1048576, 4);
+    offset += 4;
+
+    write_le(unenc_query + 28, offset - 32, 4);
+    int padding = get_padding(offset);
+    fortuna_read(unenc_query + offset, padding, &prng);
+    offset += padding;
+
+    convert_message(dcInfo, unenc_query, enc_query, offset, 0);
+    profile_gallery_loading = true;
+    profile_gallery_update_controls();
+    send_query(dcInfo, enc_query, offset + 24);
+    return true;
+}
+
+void profile_gallery_step(int delta) {
+    if (
+        !profile_gallery_active ||
+        profile_gallery_loading ||
+        profile_gallery_photos.size() < 2
+    ) {
+        return;
+    }
+
+    int next = profile_gallery_index + delta;
+    if (next < 0 || next >= (int)profile_gallery_photos.size()) {
+        MessageBeep(MB_ICONASTERISK);
+        return;
+    }
+
+    profile_gallery_index = next;
+    profile_gallery_update_controls();
+
+    if (!profile_gallery_request_selected(&dcInfoMain)) {
+        profile_gallery_loading = false;
+        profile_gallery_update_controls();
+    }
+}
+
+bool profile_gallery_handle_photos_response(
+    const BYTE* request_id,
     BYTE* response,
     int length
 ) {
-    if (
-        media_full_photo_pending_item < 0 ||
-        !rpc_id ||
-        !response ||
-        length < 13 ||
-        memcmp(
-            rpc_id,
-            media_full_photo_rpc_id,
-            8
-        ) != 0
-    ) {
+    if (!request_id || memcmp(request_id, profile_gallery_list_msgid, 8) != 0)
         return false;
-    }
 
-    int size =
-        tlstr_len(
-            response + 12,
-            false
-        );
+    memset(profile_gallery_list_msgid, 0, sizeof(profile_gallery_list_msgid));
 
-    int prefix =
-        size >= 254
-            ? 4
-            : 1;
+    if (!profile_gallery_active || !response || length < 12)
+        return true;
 
-    int data_pos = 12 + prefix;
+    profile_gallery_free_entries();
+    profile_gallery_index = 0;
+
+    unsigned int constructor = (unsigned int)read_le(response, 4);
+    int offset = 4;
+
+    if (constructor == 0x15051f54) // photos.photosSlice
+        offset += 4; // total count
+    else if (constructor != 0x8dca6aa5) // photos.photos
+        return true;
 
     if (
-        size < 0 ||
-        data_pos < 0 ||
-        data_pos + size > length
+        offset + 8 > length ||
+        (unsigned int)read_le(response + offset, 4) != 0x1cb5c415
     ) {
-        diag_log("media full photo malformed upload.file size=%d length=%d", size, length);
-        media_full_photo_pending_item = -1;
+        profile_gallery_update_controls();
         return true;
     }
 
-    FILE* f =
-        _wfopen(
-            media_full_photo_path,
-            media_full_photo_offset == 0
-                ? L"wb"
-                : L"ab"
-        );
-
-    if (!f) {
-        media_full_photo_pending_item = -1;
-        return true;
-    }
-
-    if (size > 0) {
-        fwrite(
-            response + data_pos,
-            1,
-            size,
-            f
-        );
-    }
-
-    fclose(f);
-
-    media_full_photo_offset += size;
-
-    MediaArchiveItem* item = NULL;
-
-    if (
-        media_full_photo_pending_item >= 0 &&
-        media_full_photo_pending_item <
-            (int)media_archive_items.size()
-    ) {
-        item =
-            &media_archive_items[
-                media_full_photo_pending_item
-            ];
-    }
-
-    bool more =
-        size >= 1048576 &&
-        (
-            !item ||
-            item->av_document.size <= 0 ||
-            media_full_photo_offset <
-                item->av_document.size
-        );
-
-    if (more) {
-        if (!media_archive_send_full_photo_chunk()) {
-            media_full_photo_pending_item = -1;
-        }
-        return true;
-    }
-
-    int finished_item =
-        media_full_photo_pending_item;
-
-    media_full_photo_pending_item = -1;
-    memset(media_full_photo_rpc_id, 0, 8);
-
-    if (
-        finished_item >= 0 &&
-        finished_item <
-            (int)media_archive_items.size()
-    ) {
-        MediaArchiveItem* finished =
-            &media_archive_items[finished_item];
-
-        wcsncpy(
-            finished->file_path,
-            media_full_photo_path,
-            ARRAYSIZE(finished->file_path) - 1
-        );
-        finished->file_path[
-            ARRAYSIZE(finished->file_path) - 1
-        ] = 0;
-        finished->full_file_ready = true;
-    }
-
-    diag_log(
-        "media full photo complete item=%d bytes=%I64d path=%ls",
-        finished_item,
-        media_full_photo_offset,
-        media_full_photo_path
-    );
-
-    media_archive_shell_open(
-        media_full_photo_path
-    );
-
-    return true;
-}
-
-static void media_inline_audio_apply_visual(
-    bool force
-) {
-    if (
-        !chat ||
-        !media_inline_audio ||
-        !media_inline_audio_path[0]
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    PROPVARIANT p = {0};
-    PROPVARIANT d = {0};
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    if (
-        SUCCEEDED(
-            media_inline_audio->GetPosition(
-                MFP_POSITIONTYPE_100NS,
-                &p
-            )
-        ) &&
-        p.vt == VT_I8
-    ) {
-        position = p.hVal.QuadPart;
-    }
-
-    if (
-        SUCCEEDED(
-            media_inline_audio->GetDuration(
-                MFP_POSITIONTYPE_100NS,
-                &d
-            )
-        ) &&
-        d.vt == VT_I8
-    ) {
-        duration = d.hVal.QuadPart;
-    }
-
-    int current_second =
-        (int)(position / 10000000LL);
-
-    if (
-        !force &&
-        current_second ==
-            media_inline_audio_last_second
-    ) {
-        return;
-    }
-
-    media_inline_audio_last_second =
-        current_second;
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        if (
-            !documents[i].filename ||
-            _wcsicmp(
-                documents[i].filename,
-                media_inline_audio_path
-            ) != 0 ||
-            documents[i].max <=
-                documents[i].min
-        ) {
-            continue;
-        }
-
-        LONG count =
-            documents[i].max -
-            documents[i].min;
-
-        if (count < 10 || count > 2048)
-            continue;
-
-        wchar_t* text =
-            (wchar_t*)calloc(
-                count + 2,
-                sizeof(wchar_t)
-            );
-
-        if (!text)
-            return;
-
-        TEXTRANGE range = {0};
-        range.chrg.cpMin = documents[i].min;
-        range.chrg.cpMax = documents[i].max;
-        range.lpstrText = text;
-
-        SendMessageW(
-            chat,
-            EM_GETTEXTRANGE,
-            0,
-            (LPARAM)&range
-        );
-
-        wchar_t* newline =
-            wcschr(text, L'\n');
-
-        CHARRANGE saved = {0};
-        SendMessageW(
-            chat,
-            EM_EXGETSEL,
-            0,
-            (LPARAM)&saved
-        );
-
-        bool playing =
-            state ==
-            MFP_MEDIAPLAYER_STATE_PLAYING;
-
-        SendMessageW(
-            chat,
-            EM_SETSEL,
-            documents[i].min,
-            documents[i].min + 4
-        );
-
-        SendMessageW(
-            chat,
-            EM_REPLACESEL,
-            FALSE,
-            (LPARAM)(
-                playing
-                    ? L"[II]"
-                    : L"[>] "
-            )
-        );
-
-        if (newline) {
-            int newline_offset =
-                (int)(newline - text);
-
-            const int cells = 20;
-            int filled = 0;
-
-            if (duration > 0) {
-                filled =
-                    (int)(
-                        position * cells /
-                        duration
-                    );
-            }
-
-            if (filled < 0)
-                filled = 0;
-            if (filled > cells)
-                filled = cells;
-
-            wchar_t progress[64] = {0};
-            wchar_t bar[cells + 1];
-
-            for (int k = 0; k < cells; k++) {
-                bar[k] =
-                    k < filled
-                        ? L'='
-                        : L'-';
-            }
-            bar[cells] = 0;
-
-            int hours = current_second / 3600;
-            int minutes = (current_second / 60) % 60;
-            int seconds = current_second % 60;
-
-            _snwprintf(
-                progress,
-                ARRAYSIZE(progress) - 1,
-                L"\n    [%s] %02d:%02d:%02d",
-                bar,
-                hours,
-                minutes,
-                seconds
-            );
-            progress[ARRAYSIZE(progress) - 1] = 0;
-
-            SendMessageW(
-                chat,
-                EM_SETSEL,
-                documents[i].min + newline_offset,
-                documents[i].max
-            );
-
-            SendMessageW(
-                chat,
-                EM_REPLACESEL,
-                FALSE,
-                (LPARAM)progress
-            );
-        }
-
-        CHARFORMAT2 cf;
-        memset(
-            &cf,
-            0,
-            sizeof(cf)
-        );
-        cf.cbSize = sizeof(cf);
-        cf.dwMask =
-            CFM_LINK |
-            CFM_COLOR |
-            CFM_UNDERLINE;
-        cf.dwEffects =
-            CFE_LINK |
-            CFE_UNDERLINE;
-        cf.crTextColor = RGB(0, 128, 128);
-
-        SendMessageW(
-            chat,
-            EM_SETSEL,
-            documents[i].min,
-            documents[i].max
-        );
-        SendMessageW(
-            chat,
-            EM_SETCHARFORMAT,
-            SCF_SELECTION,
-            (LPARAM)&cf
-        );
-
-        SendMessageW(
-            chat,
-            EM_EXSETSEL,
-            0,
-            (LPARAM)&saved
-        );
-
-        free(text);
-        break;
-    }
-}
-
-static VOID CALLBACK media_inline_audio_timer_proc(
-    HWND,
-    UINT,
-    UINT_PTR,
-    DWORD
-) {
-    if (!media_inline_audio) {
-        if (media_inline_audio_timer) {
-            KillTimer(NULL, media_inline_audio_timer);
-            media_inline_audio_timer = 0;
-        }
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    if (FAILED(media_inline_audio->GetState(&state)))
-        return;
-
-    media_inline_audio_apply_visual(false);
-
-    if (
-        state != MFP_MEDIAPLAYER_STATE_PLAYING &&
-        state != MFP_MEDIAPLAYER_STATE_PAUSED
-    ) {
-        media_inline_audio_apply_visual(true);
-
-        if (media_inline_audio_timer) {
-            KillTimer(NULL, media_inline_audio_timer);
-            media_inline_audio_timer = 0;
-        }
-    }
-}
-
-static void media_inline_audio_start_timer() {
-    if (!media_inline_audio_timer) {
-        media_inline_audio_timer =
-            SetTimer(
-                NULL,
-                0,
-                500,
-                media_inline_audio_timer_proc
-            );
-    }
-
-    media_inline_audio_apply_visual(true);
-}
-
-'''
-
-    s = s[:insert_at] + helpers_v3 + s[insert_at:]
-
-    # The v2 audio functions are textually before the v3 visual/timer helper
-    # definitions. Add forward declarations before replacing those functions.
-    audio_release_pos = s.find("static void media_inline_audio_release()")
-    if audio_release_pos < 0:
-        raise SystemExit("Could not locate media_inline_audio_release() for v3 forward declarations.")
-
-    audio_forward_decls = (
-        "static void media_inline_audio_apply_visual(bool force);\n"
-        "static void media_inline_audio_start_timer();\n\n"
-    )
-
-    if "static void media_inline_audio_apply_visual(bool force);" not in s[:audio_release_pos]:
-        s = (
-            s[:audio_release_pos]
-            + audio_forward_decls
-            + s[audio_release_pos:]
-        )
-
-    # Replace v2 audio release/toggle so the visual state is updated as well.
-    release_audio_v3 = r'''static void media_inline_audio_release() {
-    if (media_inline_audio) {
-        media_inline_audio_apply_visual(true);
-        media_inline_audio->Stop();
-        media_inline_audio_apply_visual(true);
-        media_inline_audio->Shutdown();
-        media_inline_audio->Release();
-        media_inline_audio = NULL;
-    }
-
-    if (media_inline_audio_timer) {
-        KillTimer(NULL, media_inline_audio_timer);
-        media_inline_audio_timer = 0;
-    }
-
-    media_inline_audio_path[0] = 0;
-    media_inline_audio_last_second = -1;
-}'''
-    s = replace_function(s, "static void media_inline_audio_release()", release_audio_v3)
-
-    toggle_audio_v3 = r'''bool media_inline_audio_toggle(
-    const wchar_t* path
-) {
-    if (!media_player_is_music_path(path))
-        return false;
-
-    if (
-        media_inline_audio &&
-        media_inline_audio_path[0] &&
-        _wcsicmp(media_inline_audio_path, path) == 0
-    ) {
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        if (SUCCEEDED(media_inline_audio->GetState(&state))) {
-            HRESULT hr = S_OK;
-
-            if (state == MFP_MEDIAPLAYER_STATE_PLAYING) {
-                hr = media_inline_audio->Pause();
-            } else {
-                hr = media_inline_audio->Play();
-            }
-
-            diag_log(
-                "inline audio toggle state=%d hr=0x%08X path=%ls",
-                (int)state,
-                (unsigned int)hr,
-                path
-            );
-
-            media_inline_audio_start_timer();
-            return SUCCEEDED(hr);
-        }
-    }
-
-    media_inline_audio_release();
-    CoInitialize(NULL);
-
-    HRESULT hr =
-        media_mf_create_player(
-            path,
-            NULL,
-            &media_inline_audio
-        );
-
-    if (SUCCEEDED(hr) && media_inline_audio) {
-        media_inline_audio->SetVolume(0.85f);
-        hr = media_inline_audio->Play();
-    }
-
-    diag_log(
-        "inline audio open hr=0x%08X path=%ls",
-        (unsigned int)hr,
-        path
-    );
-
-    if (FAILED(hr) || !media_inline_audio) {
-        media_inline_audio_release();
-        return false;
-    }
-
-    wcsncpy(
-        media_inline_audio_path,
-        path,
-        ARRAYSIZE(media_inline_audio_path) - 1
-    );
-    media_inline_audio_path[
-        ARRAYSIZE(media_inline_audio_path) - 1
-    ] = 0;
-
-    media_inline_audio_last_second = -1;
-    media_inline_audio_start_timer();
-
-    return true;
-}'''
-    s = replace_function(s, "bool media_inline_audio_toggle(", toggle_audio_v3)
-
-    # -------------------------------------------------------------------------
-    # Atomic page commit and video-thumbnail queue.
-    # -------------------------------------------------------------------------
-
-    finish_av_old_sig = "void media_archive_finish_av_page()"
-    finish_pos = s.find(finish_av_old_sig)
-    if finish_pos < 0:
-        raise SystemExit("Could not locate media_archive_finish_av_page().")
-
-    commit_helper = r'''
-static void media_archive_commit_ready_page() {
-    int total_pages =
-        media_archive_total_pages();
-
-    if (
-        total_pages > 0 &&
-        (int)media_archive_loaded_pages.size() <
-            total_pages
-    ) {
-        media_archive_loaded_pages.resize(
-            total_pages,
-            0
-        );
-    }
-
-    if (
-        media_archive_request_page >= 0 &&
-        media_archive_request_page <
-            (int)media_archive_loaded_pages.size()
-    ) {
-        media_archive_loaded_pages[
-            media_archive_request_page
-        ] = 1;
-    }
-
-    media_archive_previous_page =
-        media_archive_current_page;
-
-    media_archive_current_page =
-        media_archive_request_page;
-
-    media_archive_page_loading = false;
-
-    media_archive_refresh();
-    media_archive_update_nav();
-
-    diag_log(
-        "media atomic commit kind=%d page=%d items=%d",
-        media_archive_kind,
-        media_archive_current_page,
-        (int)media_archive_items.size()
-    );
-}
-
-'''
-
-    s = s[:finish_pos] + commit_helper + s[finish_pos:]
-
-    finish_av_v3 = r'''void media_archive_finish_av_page() {
-    if (
-        media_archive_kind == 1 &&
-        !media_archive_server_queue_empty()
-    ) {
-        media_archive_start_next_download();
-        return;
-    }
-
-    media_archive_commit_ready_page();
-}'''
-    s = replace_function(s, "void media_archive_finish_av_page()", finish_av_v3)
-
-    navigate_v3 = r'''static bool media_archive_navigate_to_page(
-    int page_index
-) {
-    int total_pages =
-        media_archive_total_pages();
-
-    if (
-        page_index < 0 ||
-        total_pages <= 0 ||
-        page_index >= total_pages
-    ) {
-        MessageBeep(MB_ICONASTERISK);
-        media_archive_update_nav();
-        return false;
-    }
-
-    if (
-        media_archive_search_pending ||
-        media_archive_page_loading
-    ) {
-        return false;
-    }
-
-    if (page_index == media_archive_current_page) {
-        media_archive_update_nav();
-        return true;
-    }
-
-    if (media_archive_page_is_loaded(page_index)) {
-        media_archive_previous_page =
-            media_archive_current_page;
-        media_archive_current_page =
-            page_index;
-        media_archive_request_page =
-            page_index;
-        media_archive_refresh();
-        return true;
-    }
-
-    media_archive_previous_page =
-        media_archive_current_page;
-    media_archive_request_page =
-        page_index;
-
-    // Do NOT change current_page and do NOT clear/repaint the ListView here.
-    // The old page remains visible until the new page is fully ready.
-    int add_offset = page_index * 20;
-
-    if (!media_archive_request_server_page_ex(0, add_offset)) {
-        media_archive_request_page =
-            media_archive_current_page;
-        media_archive_page_loading = false;
-        media_archive_update_nav();
-        return false;
-    }
-
-    return true;
-}'''
-    s = replace_function(s, "static bool media_archive_navigate_to_page(", navigate_v3)
-
-    finish_server_v3 = r'''void media_archive_finish_server_page(
-    int last_id,
-    int count,
-    int total
-) {
-    if (total > 0)
-        media_archive_total = total;
-
-    int total_pages =
-        media_archive_total_pages();
-
-    if (
-        total_pages > 0 &&
-        (int)media_archive_loaded_pages.size() <
-            total_pages
-    ) {
-        media_archive_loaded_pages.resize(
-            total_pages,
-            0
-        );
-    }
-
-    media_archive_loaded_count += count;
-
-    if (last_id > 0)
-        media_archive_next_offset_id = last_id;
-
-    media_archive_no_more =
-        count < 20 ||
-        (
-            total_pages > 0 &&
-            media_archive_request_page + 1 >=
-                total_pages
-        );
-
-    if (count <= 0) {
-        media_archive_page_loading = false;
-        media_archive_request_page =
-            media_archive_current_page;
-        MessageBeep(MB_ICONASTERISK);
-    }
-
-    media_archive_update_nav();
-
-    diag_log(
-        "media metadata ready kind=%d request=%d visible=%d count=%d total=%d",
-        media_archive_kind,
-        media_archive_request_page,
-        media_archive_current_page,
-        count,
-        media_archive_total
-    );
-}'''
-    s = replace_function(s, "void media_archive_finish_server_page(", finish_server_v3)
-
-    start_download_v3 = r'''void media_archive_start_next_download() {
-    if (!media_archive_server_active)
-        return;
-
-    for (
-        int i = (int)documents.size() - 1;
-        i >= 0;
-        i--
-    ) {
-        if (
-            documents[i].visible ||
-            documents[i].photo_size <= 1
-        ) {
-            continue;
-        }
-
-        if (!read_le(documents[i].photo_msg_id, 8)) {
-            if (documents[i].photo_size == 3) {
-                media_archive_request_video_thumbnail(
-                    &documents[i],
-                    &dcInfoMain
-                );
-            } else {
-                get_photo(
-                    NULL,
-                    &documents[i],
-                    &dcInfoMain
-                );
-            }
-
-            diag_log(
-                "media preview start kind=%d page=%d index=%d msg=%d sentinel=%d",
-                media_archive_kind,
-                media_archive_request_page,
-                i,
-                documents[i].min < 0
-                    ? -documents[i].min
-                    : 0,
-                documents[i].photo_size
-            );
-
-            return;
-        }
-    }
-
-    media_archive_commit_ready_page();
-}'''
-    s = replace_function(s, "void media_archive_start_next_download()", start_download_v3)
-
-    # -------------------------------------------------------------------------
-    # A/V item metadata + video preview queue.
-    # -------------------------------------------------------------------------
-
-    add_av_v3 = r'''void media_archive_add_av_document(
-    Document* document,
-    int message_id,
-    int kind,
-    const wchar_t* display_name,
-    int duration
-) {
-    if (
-        !document ||
-        message_id <= 0 ||
-        (kind != 1 && kind != 2)
-    ) {
-        return;
-    }
-
-    __int64 document_id = 0;
-    memcpy(&document_id, document->id, 8);
-
-    for (
-        int i = 0;
-        i < (int)media_archive_items.size();
-        i++
-    ) {
-        if (
-            media_archive_items[i].document_id == document_id &&
-            media_archive_items[i].media_kind == kind
-        ) {
-            return;
-        }
-    }
-
-    MediaArchiveItem item = {0};
-    item.document_id = document_id;
-    item.message_id = message_id;
-    item.page_index = media_archive_request_page;
-    item.media_kind = kind;
-    item.duration = duration;
-    item.has_document = true;
-    item.full_file_ready = false;
-
-    item.av_document = *document;
-    item.av_document.filename =
-        document->filename
-            ? _wcsdup(document->filename)
-            : NULL;
-
-    int file_ref_len =
-        document->file_reference
-            ? tlstr_len(document->file_reference, true)
-            : 0;
-
-    item.av_document.file_reference = NULL;
-
-    if (file_ref_len > 0) {
-        item.av_document.file_reference =
-            (BYTE*)malloc(file_ref_len);
-
-        if (item.av_document.file_reference) {
-            memcpy(
-                item.av_document.file_reference,
-                document->file_reference,
-                file_ref_len
-            );
-        }
-    }
-
-    if (display_name && display_name[0]) {
-        wcsncpy(
-            item.display_name,
-            display_name,
-            ARRAYSIZE(item.display_name) - 1
-        );
-    } else if (document->filename) {
-        wcsncpy(
-            item.display_name,
-            document->filename,
-            ARRAYSIZE(item.display_name) - 1
-        );
-    }
-
-    item.display_name[
-        ARRAYSIZE(item.display_name) - 1
-    ] = 0;
-
-    media_archive_items.push_back(item);
-
-    // Telegram Document thumbnails are fetched independently from the full
-    // video file. photo_size==3 means JPEG document preview.
-    if (
-        kind == 1 &&
-        document->photo_size == 3 &&
-        document->file_reference &&
-        file_ref_len > 0
-    ) {
-        Document thumb = {0};
-        thumb = *document;
-        thumb.visible = false;
-        thumb.min = -message_id;
-        thumb.max = -message_id;
-        thumb.photo_size = 3;
-        memset(thumb.photo_msg_id, 0, 8);
-
-        thumb.filename =
-            document->filename
-                ? _wcsdup(document->filename)
-                : NULL;
-
-        thumb.file_reference =
-            (BYTE*)malloc(file_ref_len);
-
-        if (thumb.file_reference) {
-            memcpy(
-                thumb.file_reference,
-                document->file_reference,
-                file_ref_len
-            );
-            documents.push_front(thumb);
-        } else {
-            free(thumb.filename);
-        }
-    }
-}'''
-    s = replace_function(s, "void media_archive_add_av_document(", add_av_v3)
-
-    # -------------------------------------------------------------------------
-    # Images/video previews: retain full Photo location, attach document thumbs,
-    # and never repaint once per thumbnail.
-    # -------------------------------------------------------------------------
-
-    add_document_v3 = r'''void media_archive_add_document(
-    Document* document,
-    HBITMAP bitmap
-) {
-    if (
-        !document ||
-        !bitmap ||
-        document->photo_size == 1
-    ) {
-        return;
-    }
-
-    __int64 document_id = 0;
-    memcpy(
-        &document_id,
-        document->id,
-        sizeof(document_id)
-    );
-
-    // photo_size == 3 is a video Document thumbnail. It is useful both in the
-    // chat and the Video tab, but must never become an Images-tab entry.
-    if (document->photo_size == 3) {
-        for (
-            int i = 0;
-            i < (int)media_archive_items.size();
-            i++
-        ) {
-            if (
-                media_archive_items[i].media_kind == 1 &&
-                media_archive_items[i].document_id == document_id &&
-                media_archive_items[i].page_index ==
-                    media_archive_request_page
-            ) {
-                if (!media_archive_items[i].bitmap) {
-                    media_archive_items[i].bitmap =
-                        (HBITMAP)CopyImage(
-                            bitmap,
-                            IMAGE_BITMAP,
-                            0,
-                            0,
-                            LR_CREATEDIBSECTION
-                        );
-                }
-                break;
-            }
-        }
-
-        if (
-            !document->visible &&
-            media_archive_server_active &&
-            media_archive_server_queue_empty()
-        ) {
-            media_archive_commit_ready_page();
-        }
-
-        return;
-    }
-
-    if (
-        media_archive_server_active &&
-        document->visible
-    ) {
-        return;
-    }
-
-    if (
-        !media_archive_server_active &&
-        !document->visible
-    ) {
-        return;
-    }
-
-    for (
-        int i = 0;
-        i < (int)media_archive_items.size();
-        i++
-    ) {
-        if (
-            media_archive_items[i].media_kind == 0 &&
-            media_archive_items[i].document_id == document_id
-        ) {
-            return;
-        }
-    }
-
-    int message_id = 0;
-
-    if (!document->visible && document->min < 0)
-        message_id = -document->min;
-
-    if (document->visible) {
-        for (
-            int i = 0;
-            i < (int)messages.size();
-            i++
-        ) {
-            if (
-                document->min >= messages[i].start_char &&
-                document->max <= messages[i].end_footer
-            ) {
-                message_id = messages[i].id;
-                break;
-            }
-        }
-    }
-
-    HBITMAP copy =
-        (HBITMAP)CopyImage(
-            bitmap,
-            IMAGE_BITMAP,
-            0,
-            0,
-            LR_CREATEDIBSECTION
-        );
-
-    if (!copy)
-        return;
-
-    MediaArchiveItem item = {0};
-    item.document_id = document_id;
-    item.media_kind = 0;
-    item.message_id = message_id;
-    item.page_index =
-        media_archive_server_active
-            ? media_archive_request_page
-            : 0;
-    item.bitmap = copy;
-    item.file_path[0] = 0;
-    item.has_document = true;
-    item.full_file_ready = false;
-
-    item.av_document = *document;
-    item.av_document.filename =
-        document->filename
-            ? _wcsdup(document->filename)
-            : NULL;
-
-    int file_ref_len =
-        document->file_reference
-            ? tlstr_len(document->file_reference, true)
-            : 0;
-
-    item.av_document.file_reference = NULL;
-
-    if (file_ref_len > 0) {
-        item.av_document.file_reference =
-            (BYTE*)malloc(file_ref_len);
-
-        if (item.av_document.file_reference) {
-            memcpy(
-                item.av_document.file_reference,
-                document->file_reference,
-                file_ref_len
-            );
-        }
-    }
-
-    media_archive_items.push_back(item);
-
-    if (
-        media_archive_server_active &&
-        media_archive_server_queue_empty()
-    ) {
-        media_archive_commit_ready_page();
-    } else {
-        media_archive_update_nav();
-    }
-}'''
-    s = replace_function(s, "void media_archive_add_document(", add_document_v3)
-
-    # -------------------------------------------------------------------------
-    # Classic video cards + music list. Avoid FRAMECHANGED when the view mode
-    # didn't actually change; this was another source of flashing.
-    # -------------------------------------------------------------------------
-
-    refresh_pos = s.find("static void media_archive_refresh() {")
-    if refresh_pos < 0:
-        raise SystemExit("Could not locate Media refresh function.")
-
-    video_thumb_helper = r'''
-static HBITMAP media_archive_make_video_thumbnail(
-    HBITMAP source
-) {
-    HBITMAP result =
-        source
-            ? media_archive_make_thumbnail(source, 96)
-            : NULL;
-
-    if (!result) {
-        HDC screen = GetDC(NULL);
-        if (!screen)
-            return NULL;
-
-        result = CreateCompatibleBitmap(screen, 96, 96);
-        ReleaseDC(NULL, screen);
-
-        if (!result)
-            return NULL;
-
-        HDC dc = CreateCompatibleDC(NULL);
-        HGDIOBJ old = SelectObject(dc, result);
-        RECT all = {0, 0, 96, 96};
-        FillRect(dc, &all, GetSysColorBrush(COLOR_3DFACE));
-        DrawEdge(dc, &all, EDGE_SUNKEN, BF_RECT);
-        SelectObject(dc, old);
-        DeleteDC(dc);
-    }
-
-    HDC dc = CreateCompatibleDC(NULL);
-    if (!dc)
-        return result;
-
-    HGDIOBJ old_bitmap = SelectObject(dc, result);
-
-    RECT button = {34, 34, 62, 62};
-    FillRect(dc, &button, GetSysColorBrush(COLOR_BTNFACE));
-    DrawEdge(dc, &button, EDGE_RAISED, BF_RECT);
-
-    POINT tri[3] = {
-        {43, 41},
-        {56, 48},
-        {43, 55}
-    };
-
-    HBRUSH brush = CreateSolidBrush(GetSysColor(COLOR_BTNTEXT));
-    HGDIOBJ old_brush = SelectObject(dc, brush);
-    Polygon(dc, tri, 3);
-    SelectObject(dc, old_brush);
-    DeleteObject(brush);
-
-    SelectObject(dc, old_bitmap);
-    DeleteDC(dc);
-
-    return result;
-}
-
-'''
-
-    s = s[:refresh_pos] + video_thumb_helper + s[refresh_pos:]
-
-    refresh_v3 = r'''static void media_archive_refresh() {
-    if (!hMediaArchiveList)
-        return;
-
-    SendMessageW(
-        hMediaArchiveList,
-        WM_SETREDRAW,
-        FALSE,
-        0
-    );
-
-    bool icon_grid =
-        media_archive_kind == 0 ||
-        media_archive_kind == 1;
-
-    LONG_PTR old_style =
-        GetWindowLongPtrW(
-            hMediaArchiveList,
-            GWL_STYLE
-        );
-
-    LONG_PTR desired_type =
-        icon_grid
-            ? LVS_ICON
-            : LVS_LIST;
-
-    if ((old_style & LVS_TYPEMASK) != desired_type) {
-        LONG_PTR new_style =
-            (old_style & ~LVS_TYPEMASK) |
-            desired_type;
-
-        SetWindowLongPtrW(
-            hMediaArchiveList,
-            GWL_STYLE,
-            new_style
-        );
-    }
-
-    ListView_DeleteAllItems(
-        hMediaArchiveList
-    );
-
-    HIMAGELIST old_images =
-        hMediaArchiveImages;
-
-    hMediaArchiveImages = NULL;
-
-    if (icon_grid) {
-        hMediaArchiveImages =
-            ImageList_Create(
-                96,
-                96,
-                ILC_COLOR32,
-                20,
-                16
-            );
-
-        if (hMediaArchiveImages) {
-            ListView_SetImageList(
-                hMediaArchiveList,
-                hMediaArchiveImages,
-                LVSIL_NORMAL
-            );
-
-            SendMessageW(
-                hMediaArchiveList,
-                LVM_SETICONSPACING,
-                0,
-                MAKELPARAM(116, 120)
-            );
-        }
-    } else {
-        ListView_SetImageList(
-            hMediaArchiveList,
-            NULL,
-            LVSIL_NORMAL
-        );
-    }
-
-    if (old_images)
-        ImageList_Destroy(old_images);
-
-    for (
-        int i = 0;
-        i < (int)media_archive_items.size();
-        i++
-    ) {
-        MediaArchiveItem* archive_item =
-            &media_archive_items[i];
-
-        if (
-            archive_item->media_kind != media_archive_kind ||
-            archive_item->page_index != media_archive_current_page
-        ) {
-            continue;
-        }
-
-        LVITEMW item = {0};
-        item.iItem =
-            ListView_GetItemCount(
-                hMediaArchiveList
-            );
-        item.lParam = i;
-
-        wchar_t label[340] = {0};
-
-        if (icon_grid) {
-            HBITMAP thumb =
-                media_archive_kind == 1
-                    ? media_archive_make_video_thumbnail(
-                        archive_item->bitmap
-                    )
-                    : media_archive_make_thumbnail(
-                        archive_item->bitmap,
-                        96
-                    );
-
-            if (!thumb || !hMediaArchiveImages) {
-                if (thumb)
-                    DeleteObject(thumb);
-                continue;
-            }
-
-            int image_index =
-                ImageList_Add(
-                    hMediaArchiveImages,
-                    thumb,
-                    NULL
-                );
-
-            DeleteObject(thumb);
-
-            if (image_index < 0)
-                continue;
-
-            if (media_archive_kind == 1) {
-                if (archive_item->duration > 0) {
-                    _snwprintf(
-                        label,
-                        ARRAYSIZE(label) - 1,
-                        L"%02d:%02d",
-                        archive_item->duration / 60,
-                        archive_item->duration % 60
-                    );
-                } else {
-                    wcscpy(label, L"Video");
-                }
-            } else if (archive_item->message_id > 0) {
-                _snwprintf(
-                    label,
-                    ARRAYSIZE(label) - 1,
-                    L"#%d",
-                    archive_item->message_id
-                );
-            }
-
-            item.mask =
-                LVIF_IMAGE |
-                LVIF_PARAM |
-                LVIF_TEXT;
-            item.iImage = image_index;
-        } else {
-            if (archive_item->duration > 0) {
-                _snwprintf(
-                    label,
-                    ARRAYSIZE(label) - 1,
-                    L"[>]  %s    %02d:%02d",
-                    archive_item->display_name,
-                    archive_item->duration / 60,
-                    archive_item->duration % 60
-                );
-            } else {
-                _snwprintf(
-                    label,
-                    ARRAYSIZE(label) - 1,
-                    L"[>]  %s",
-                    archive_item->display_name
-                );
-            }
-
-            item.mask =
-                LVIF_PARAM |
-                LVIF_TEXT;
-        }
-
-        label[ARRAYSIZE(label) - 1] = 0;
-        item.pszText = label;
-
-        SendMessageW(
-            hMediaArchiveList,
-            LVM_INSERTITEMW,
-            0,
-            (LPARAM)&item
-        );
-    }
-
-    media_archive_update_nav();
-
-    SendMessageW(
-        hMediaArchiveList,
-        WM_SETREDRAW,
-        TRUE,
-        0
-    );
-
-    RedrawWindow(
-        hMediaArchiveList,
-        NULL,
-        NULL,
-        RDW_INVALIDATE |
-        RDW_UPDATENOW |
-        RDW_ALLCHILDREN
-    );
-}'''
-    s = replace_function(s, "static void media_archive_refresh() {", refresh_v3)
-
-    # Double-click image -> fetch the actual largest Telegram Photo size.
-    open_item_v3 = r'''static void media_archive_open_item(
-    int item_index
-) {
-    if (
-        item_index < 0 ||
-        item_index >=
-            (int)media_archive_items.size()
-    ) {
-        return;
-    }
-
-    MediaArchiveItem* item =
-        &media_archive_items[item_index];
-
-    if (item->media_kind == 0) {
-        if (!media_archive_begin_full_photo_download(item_index))
-            MessageBeep(MB_ICONASTERISK);
-        return;
-    }
-
-    media_archive_begin_av_download(
-        item_index
-    );
-}'''
-    s = replace_function(s, "static void media_archive_open_item(", open_item_v3)
-
-    # Reopening an already-open Media window should not rebuild the current
-    # ListView merely to bring the window forward.
-    show_start, show_end = function_range(s, "void media_archive_show()")
-    show_func = s[show_start:show_end]
-
-    existing_refresh = r'''        media_archive_refresh();
-
-        ShowWindow(
-            hMediaArchiveWindow,
-            SW_SHOW
-        );'''
-
-    if existing_refresh in show_func:
-        show_func = show_func.replace(
-            existing_refresh,
-            r'''        ShowWindow(
-            hMediaArchiveWindow,
-            SW_SHOW
-        );''',
-            1,
-        )
-
-    s = s[:show_start] + show_func + s[show_end:]
-
-write(t, s)
-
-
-# -----------------------------------------------------------------------------
-# response.cpp
-# -----------------------------------------------------------------------------
-
-s = read(r)
-
-if "media_tabs_av_response_v3" not in s:
-    # Document has a normal JPEG thumbnail vector. Sentinel 3 tells get_photo()
-    # to use inputDocumentFileLocation while retaining JPEG decoding.
-    parser_start, parser_end = function_range(
-        s,
-        "static bool media_tabs_extract_document("
-    )
-    parser = s[parser_start:parser_end]
-
-    old_variants = [
-        "    document->photo_size =\n        (kind == 1 && (doc_flags & (1 << 0))) ? 2 : 0;",
-        "    document->photo_size =\n        (kind == 1 && (doc_flags & (1 << 0)))\n            ? 2\n            : 0;",
-    ]
-
-    replaced_sentinel = False
-    for old in old_variants:
-        if old in parser:
-            parser = parser.replace(
-                old,
-                "    document->photo_size =\n        (kind == 1 && (doc_flags & (1 << 0))) ? 3 : 0;",
-                1,
-            )
-            replaced_sentinel = True
-            break
-
-    if not replaced_sentinel and "? 3 : 0;" not in parser:
-        raise SystemExit("Could not locate A/V thumbnail sentinel assignment.")
-
-    s = s[:parser_start] + parser + s[parser_end:]
-
-    # Both Images and Video need their preview queues drained before the page
-    # is atomically committed. Music has no preview queue.
-    handler_start, handler_end = function_range(
-        s,
-        "static void media_archive_handle_server_response("
-    )
-    handler = s[handler_start:handler_end]
-
-    old_tail = r'''    if (
-        media_archive_kind == 0 &&
-        added_count > 0
-    ) {
-        media_archive_start_next_download();
-    } else {
-        media_archive_finish_av_page();
-    }'''
-
-    new_tail = r'''    if (
-        (
-            media_archive_kind == 0 ||
-            media_archive_kind == 1
-        ) &&
-        added_count > 0
-    ) {
-        media_archive_start_next_download();
-    } else {
-        media_archive_finish_av_page();
-    }'''
-
-    if old_tail not in handler:
-        raise SystemExit("Could not locate Media response preview-dispatch tail.")
-
-    handler = handler.replace(old_tail, new_tail, 1)
-    s = s[:handler_start] + handler + s[handler_end:]
-
-    # Full-size Photo requests have their own rpc id and must be consumed before
-    # the ordinary downloading_docs / thumbnail routing.
-    upload_case = s.find("case 0x96a18d5: { // upload.file")
-    if upload_case < 0:
-        raise SystemExit("Could not locate upload.file case.")
-
-    diag_text = "\"upload.file state downloads=%d documents=%d custom_emoji=%d\""
-    diag_pos = s.find(diag_text, upload_case)
-    if diag_pos < 0:
-        raise SystemExit("Could not locate upload.file diagnostic string.")
-
-    insert_pos = s.find(");", diag_pos)
-    if insert_pos < 0:
-        raise SystemExit("Could not locate upload.file diagnostic close.")
-    insert_pos += 2
-
-    upload_insertion = r'''
-
-        // media_tabs_av_response_v3
-        if (
-            media_archive_handle_full_photo_upload(
-                last_rpcresult_msgid,
-                unenc_response,
-                length
-            )
-        ) {
+    int count = (int)read_le(response + offset + 4, 4);
+    offset += 8;
+
+    for (int i = 0; i < count && offset + 4 < length; i++) {
+        int photo_len = photo_offset(response + offset);
+        if (photo_len <= 0 || offset + photo_len > length)
             break;
-        }'''
 
-    s = s[:insert_pos] + upload_insertion + s[insert_pos:]
+        TelegacyProfileGalleryPhoto entry;
+        if (profile_gallery_parse_photo(response + offset, &entry))
+            profile_gallery_photos.push_back(entry);
 
-write(r, s)
-
-
-# -----------------------------------------------------------------------------
-# message.cpp: visible two-line inline audio player + video preview in chat.
-# -----------------------------------------------------------------------------
-
-s = read(m)
-
-if "media_inline_player_v3" not in s:
-    # Helper draws a classic 160x90 placeholder until Telegram's real video
-    # document thumbnail arrives and replace_in_chat() swaps it in.
-    handler_pos = s.find("int message_handler(")
-    if handler_pos < 0:
-        raise SystemExit("Could not locate message_handler().")
-
-    message_helper = r'''
-// media_inline_player_v3
-static HBITMAP media_chat_video_placeholder() {
-    HDC screen = GetDC(NULL);
-    if (!screen)
-        return NULL;
-
-    HBITMAP bitmap =
-        CreateCompatibleBitmap(
-            screen,
-            160,
-            90
-        );
-
-    ReleaseDC(NULL, screen);
-
-    if (!bitmap)
-        return NULL;
-
-    HDC dc = CreateCompatibleDC(NULL);
-    HGDIOBJ old_bitmap = SelectObject(dc, bitmap);
-
-    RECT all = {0, 0, 160, 90};
-    FillRect(dc, &all, GetSysColorBrush(COLOR_3DFACE));
-    DrawEdge(dc, &all, EDGE_SUNKEN, BF_RECT);
-
-    RECT button = {64, 28, 96, 60};
-    FillRect(dc, &button, GetSysColorBrush(COLOR_BTNFACE));
-    DrawEdge(dc, &button, EDGE_RAISED, BF_RECT);
-
-    POINT tri[3] = {
-        {75, 36},
-        {88, 44},
-        {75, 52}
-    };
-
-    HBRUSH brush = CreateSolidBrush(GetSysColor(COLOR_BTNTEXT));
-    HGDIOBJ old_brush = SelectObject(dc, brush);
-    Polygon(dc, tri, 3);
-    SelectObject(dc, old_brush);
-    DeleteObject(brush);
-
-    SelectObject(dc, old_bitmap);
-    DeleteDC(dc);
-
-    return bitmap;
-}
-
-'''
-
-    s = s[:handler_pos] + message_helper + s[handler_pos:]
-
-    # Track whether this document is a normal video and has Telegram thumbs.
-    flags_old = "\t\tbool voice = false, gif = false, round = false, sticker = false, music = false; // media_inline_music_row_v2"
-    flags_new = "\t\tbool voice = false, gif = false, round = false, sticker = false, music = false, video = false, video_has_thumb = false; // media_inline_music_row_v2"
-
-    if flags_old not in s:
-        raise SystemExit("Could not locate document media flags in message.cpp.")
-    s = s.replace(flags_old, flags_new, 1)
-
-    outer_old = "\tbool added_doc = false, added_photo = false;\n"
-    outer_new = outer_old + "\tDocument video_thumb_document = {0};\n\tbool added_video_thumb = false;\n"
-    if outer_old not in s:
-        raise SystemExit("Could not locate outer message document flags.")
-    s = s.replace(outer_old, outer_new, 1)
-
-    doc_flags_old = "\t\t\tint doc_flags = read_le(doc + offset, 4);\n\t\t\toffset += 4;"
-    doc_flags_new = "\t\t\tint doc_flags = read_le(doc + offset, 4);\n\t\t\tvideo_has_thumb = (doc_flags & (1 << 0)) ? true : false;\n\t\t\toffset += 4;"
-
-    if doc_flags_old not in s:
-        raise SystemExit("Could not locate document flags parsing.")
-    s = s.replace(doc_flags_old, doc_flags_new, 1)
-
-    video_attr_old = "\t\t\t\t\telse {\n\t\t\t\t\t\tdouble duration_double;"
-    video_attr_new = "\t\t\t\t\telse {\n\t\t\t\t\t\tvideo = true;\n\t\t\t\t\t\tdouble duration_double;"
-
-    if video_attr_old not in s:
-        raise SystemExit("Could not locate video attribute parsing.")
-    s = s.replace(video_attr_old, video_attr_new, 1)
-
-    # Replace the simple music row with an unmistakable in-chat player. The
-    # second line has fixed length, so the timer can update it without shifting
-    # any subsequent message positions.
-    row_old = '''\t\t\tdocument.min = cr_startmsg.cpMin + written;\n\t\t\tif (music) written += riched_write(chat, L"[>] " );\n\t\t\twritten += riched_write(chat, document.filename);\n\t\t\tif (duration_str[0] == ' ') written += riched_write(chat, &duration_str[0]);\n\t\t\twritten += riched_write(chat, &size_str[0]);\n\t\t\tdocument.max = cr_startmsg.cpMin + written;'''
-
-    row_new = r'''			document.min = cr_startmsg.cpMin + written;
-
-			if (video && video_has_thumb && !same_photo) {
-				video_thumb_document = document;
-				video_thumb_document.filename = document.filename ? _wcsdup(document.filename) : NULL;
-
-				int thumb_ref_len =
-					document.file_reference
-						? tlstr_len(document.file_reference, true)
-						: 0;
-
-				video_thumb_document.file_reference = NULL;
-
-				if (thumb_ref_len > 0) {
-					video_thumb_document.file_reference = (BYTE*)malloc(thumb_ref_len);
-					if (video_thumb_document.file_reference) {
-						memcpy(video_thumb_document.file_reference, document.file_reference, thumb_ref_len);
-					}
-				}
-
-				video_thumb_document.photo_size = 3;
-				video_thumb_document.visible = true;
-				memset(video_thumb_document.photo_msg_id, 0, 8);
-				video_thumb_document.min = cr_startmsg.cpMin + written;
-
-				HBITMAP placeholder = media_chat_video_placeholder();
-				if (placeholder) {
-					insert_image(chat, NULL, placeholder);
-					DeleteObject(placeholder);
-					written++;
-				}
-
-				video_thumb_document.max = cr_startmsg.cpMin + written;
-
-				if (
-					video_thumb_document.file_reference &&
-					video_thumb_document.max > video_thumb_document.min
-				) {
-					added_video_thumb = true;
-				} else {
-					free(video_thumb_document.filename);
-					free(video_thumb_document.file_reference);
-					memset(&video_thumb_document, 0, sizeof(video_thumb_document));
-				}
-
-				written += riched_write(chat, L"\n");
-				document.min = cr_startmsg.cpMin + written;
-			}
-
-			if (music)
-				written += riched_write(chat, L"[>] " );
-
-			written += riched_write(chat, document.filename);
-
-			if (duration_str[0] == ' ')
-				written += riched_write(chat, &duration_str[0]);
-
-			written += riched_write(chat, &size_str[0]);
-
-			if (music) {
-				written += riched_write(
-					chat,
-					L"\n    [--------------------] 00:00:00"
-				);
-			}
-
-			document.max = cr_startmsg.cpMin + written;'''
-
-    if row_old not in s:
-        raise SystemExit("Could not locate v2 document row rendering block.")
-    s = s.replace(row_old, row_new, 1)
-
-    adjust_old = "\t\tif (added_doc) {\n\t\t\tdocument.min -= deleted_wchars;\n\t\t\tdocument.max -= deleted_wchars;\n\t\t}\n"
-    adjust_new = adjust_old + "\t\tif (added_video_thumb) {\n\t\t\tvideo_thumb_document.min -= deleted_wchars;\n\t\t\tvideo_thumb_document.max -= deleted_wchars;\n\t\t}\n"
-
-    if adjust_old not in s:
-        raise SystemExit("Could not locate document emoji-position adjustment.")
-    s = s.replace(adjust_old, adjust_new, 1)
-
-    final_push_old = "\t\tif (added_doc) {\n\t\t\tif (to_front) documents.push_front(document);\n\t\t\telse documents.push_back(document);\n\t\t}\n"
-    final_push_new = final_push_old + "\t\tif (added_video_thumb) {\n\t\t\tif (to_front) documents.push_front(video_thumb_document);\n\t\t\telse documents.push_back(video_thumb_document);\n\n\t\t\tif (!to_front && IMAGELOADPOLICY == 2) {\n\t\t\t\tfor (int k = (int)documents.size() - 1; k >= 0; k--) {\n\t\t\t\t\tif (documents[k].photo_size == 3 && memcmp(documents[k].id, video_thumb_document.id, 8) == 0 && !read_le(documents[k].photo_msg_id, 8)) {\n\t\t\t\t\t\tmedia_archive_request_video_thumbnail(&documents[k], &dcInfoMain);\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n"
-
-    if final_push_old not in s:
-        raise SystemExit("Could not locate final document push block.")
-    s = s.replace(final_push_old, final_push_new, 1)
-
-write(m, s)
-
-
-# -----------------------------------------------------------------------------
-# Final v3 validation
-# -----------------------------------------------------------------------------
-
-checks_v3 = {
-    h: [
-        "media_tabs_av_v3",
-        "media_archive_handle_full_photo_upload",
-        "media_archive_request_video_thumbnail",
-    ],
-    g: [
-        "document->photo_size == 3",
-    ],
-    t: [
-        "media_tabs_av_runtime_v3",
-        "media_archive_commit_ready_page",
-        "media_archive_make_video_thumbnail",
-        "media_archive_begin_full_photo_download",
-        "media full photo complete",
-        "media_inline_audio_apply_visual",
-        "media_inline_audio_timer_proc",
-        "old page remains visible",
-    ],
-    r: [
-        "media_tabs_av_response_v3",
-        "? 3",
-        "media_archive_kind == 1",
-    ],
-    m: [
-        "media_inline_player_v3",
-        "media_chat_video_placeholder",
-        "[--------------------] 00:00:00",
-        "video_thumb_document.photo_size = 3",
-    ],
-}
-
-for p, tokens in checks_v3.items():
-    text = read(p)
-    for token in tokens:
-        if token not in text:
-            raise SystemExit(
-                f"Media v3 verification failed in {p.name}: {token}"
-            )
-
-print(
-    "Applied Media A/V v3: atomic no-flicker page swaps, full-size photo open, "
-    "video previews in Media/chat, and visible inline audio player with progress."
-)
-
-
-# =============================================================================
-# Media A/V v4
-# - reliable MFPlay video seeking (deferred commit + anti-snapback window)
-# - real graphical inline audio player embedded in the RichEdit stream
-# - clickable/draggable seek and volume controls directly in chat
-# =============================================================================
-
-p = root / "src" / "procs.cpp"
-if not p.exists():
-    raise SystemExit(f"Missing expected Telegacy file: {p}")
-
-# -----------------------------------------------------------------------------
-# telegacy.h: cross-file declarations used by message.cpp and procs.cpp
-# -----------------------------------------------------------------------------
-s = read(h)
-
-if "media_tabs_av_v4" not in s:
-    anchor = "bool media_inline_audio_toggle(const wchar_t* path);"
-    if anchor not in s:
-        raise SystemExit("Could not locate inline-audio declaration for v4.")
-
-    s = s.replace(
-        anchor,
-        anchor
-        + "\nHBITMAP media_inline_audio_make_bitmap(int duration_seconds, LONGLONG position_100ns, bool playing, int volume);"
-        + "\nbool media_inline_audio_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);"
-        + "\n// media_tabs_av_v4",
-        1,
-    )
-
-write(h, s)
-
-
-# -----------------------------------------------------------------------------
-# telegacy.cpp: seek fix + graphical inline player implementation
-# -----------------------------------------------------------------------------
-s = read(t)
-
-if "media_tabs_av_runtime_v4" not in s:
-    global_anchor = "static wchar_t media_inline_audio_path[MAX_PATH] = {0};"
-    if global_anchor not in s:
-        raise SystemExit("Could not locate Media v2 inline-audio globals for v4.")
-
-    s = s.replace(
-        global_anchor,
-        global_anchor
-        + r'''
-
-// media_tabs_av_runtime_v4
-static DWORD media_player_seek_hold_until = 0;
-static int media_inline_audio_volume = 85;
-static int media_inline_audio_drag_mode = 0; // 1 seek, 2 volume
-static int media_inline_audio_drag_document = -1;
-''',
-        1,
-    )
-
-    # -------------------------------------------------------------------------
-    # Video seek: MFPlay seeking is asynchronous.  The old code immediately
-    # asked GetPosition() again and snapped the slider back to the old position.
-    # Pause -> SetPosition -> resume, then suppress timer-driven thumb updates
-    # briefly while MFPlay commits the asynchronous seek.
-    # -------------------------------------------------------------------------
-    seek_v4 = r'''static void media_player_set_position_v2(LONGLONG target) {
-    if (target < 0)
-        target = 0;
-
-    if (media_player_backend == 1 && media_player_mf) {
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        media_player_mf->GetState(&state);
-
-        bool resume =
-            state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-        if (resume)
-            media_player_mf->Pause();
-
-        PROPVARIANT value = {0};
-        value.vt = VT_I8;
-        value.hVal.QuadPart = target;
-
-        HRESULT hr =
-            media_player_mf->SetPosition(
-                MFP_POSITIONTYPE_100NS,
-                &value
-            );
-
-        media_player_seek_hold_until =
-            GetTickCount() + 900;
-
-        diag_log(
-            "media player seek target=%I64d hr=0x%08X resume=%d",
-            target,
-            (unsigned int)hr,
-            resume ? 1 : 0
-        );
-
-        if (resume && SUCCEEDED(hr))
-            media_player_mf->Play();
-
-        return;
+        offset += photo_len;
     }
 
-    if (media_player_backend == 2 && media_player_seeking) {
-        HRESULT hr =
-            media_player_seeking->SetPositions(
-                &target,
-                AM_SEEKING_AbsolutePositioning,
-                NULL,
-                AM_SEEKING_NoPositioning
-            );
+    profile_gallery_loading = false;
+    profile_gallery_update_controls();
 
-        media_player_seek_hold_until =
-            GetTickCount() + 450;
-
-        diag_log(
-            "media player DirectShow seek target=%I64d hr=0x%08X",
-            target,
-            (unsigned int)hr
-        );
-    }
-}'''
-    s = replace_function(s, "static void media_player_set_position_v2(", seek_v4)
-
-    update_v4 = r'''static void media_player_update_controls() {
-    if (!hMediaPlayerSeek)
-        return;
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    if (!media_player_get_time(&position, &duration))
-        return;
-
-    bool seek_hold =
-        media_player_seek_hold_until != 0 &&
-        (LONG)(GetTickCount() - media_player_seek_hold_until) < 0;
-
-    if (!media_player_user_seeking && !seek_hold) {
-        int slider =
-            (int)(
-                position * 1000LL /
-                duration
-            );
-
-        SendMessageW(
-            hMediaPlayerSeek,
-            TBM_SETPOS,
-            TRUE,
-            slider
-        );
-    }
-
-    if (hMediaPlayerTime) {
-        wchar_t now_text[32] = {0};
-        wchar_t total_text[32] = {0};
-        wchar_t combined[80] = {0};
-
-        media_player_format_time(
-            position,
-            now_text,
-            ARRAYSIZE(now_text)
-        );
-
-        media_player_format_time(
-            duration,
-            total_text,
-            ARRAYSIZE(total_text)
-        );
-
-        _snwprintf(
-            combined,
-            ARRAYSIZE(combined) - 1,
-            L"%s / %s",
-            now_text,
-            total_text
-        );
-        combined[ARRAYSIZE(combined) - 1] = 0;
-
-        SetWindowTextW(
-            hMediaPlayerTime,
-            combined
-        );
-    }
-}'''
-    s = replace_function(s, "static void media_player_update_controls()", update_v4)
-
-    # Replace only the seek branch inside the existing player window proc.
-    proc_start, proc_end = function_range(
-        s,
-        "static LRESULT CALLBACK TelegacyMediaPlayerWindow("
-    )
-    proc = s[proc_start:proc_end]
-
-    old_seek_branch = r'''            if (source == hMediaPlayerSeek) {
-                int code = LOWORD(wParam);
-                if (code == TB_THUMBTRACK || code == TB_THUMBPOSITION || code == TB_ENDTRACK) {
-                    media_player_user_seeking = true;
-
-                    int slider = (int)SendMessageW(hMediaPlayerSeek, TBM_GETPOS, 0, 0);
-                    LONGLONG position = 0;
-                    LONGLONG duration = 0;
-
-                    if (media_player_get_time(&position, &duration))
-                        media_player_set_position_v2(duration * slider / 1000LL);
-
-                    if (code == TB_ENDTRACK || code == TB_THUMBPOSITION)
-                        media_player_user_seeking = false;
-
-                    media_player_update_controls();
-                }
-                return 0;
-            }'''
-
-    new_seek_branch = r'''            if (source == hMediaPlayerSeek) {
-                int code = LOWORD(wParam);
-                int slider =
-                    (int)SendMessageW(
-                        hMediaPlayerSeek,
-                        TBM_GETPOS,
-                        0,
-                        0
-                    );
-
-                LONGLONG position = 0;
-                LONGLONG duration = 0;
-
-                if (code == TB_THUMBTRACK) {
-                    // While dragging, leave playback alone.  This prevents a
-                    // flood of asynchronous MFPlay SetPosition calls.
-                    media_player_user_seeking = true;
-
-                    if (
-                        media_player_get_time(
-                            &position,
-                            &duration
-                        ) &&
-                        duration > 0 &&
-                        hMediaPlayerTime
-                    ) {
-                        LONGLONG preview =
-                            duration *
-                            slider /
-                            1000LL;
-
-                        wchar_t now_text[32] = {0};
-                        wchar_t total_text[32] = {0};
-                        wchar_t combined[80] = {0};
-
-                        media_player_format_time(
-                            preview,
-                            now_text,
-                            ARRAYSIZE(now_text)
-                        );
-
-                        media_player_format_time(
-                            duration,
-                            total_text,
-                            ARRAYSIZE(total_text)
-                        );
-
-                        _snwprintf(
-                            combined,
-                            ARRAYSIZE(combined) - 1,
-                            L"%s / %s",
-                            now_text,
-                            total_text
-                        );
-
-                        SetWindowTextW(
-                            hMediaPlayerTime,
-                            combined
-                        );
-                    }
-
-                    return 0;
-                }
-
-                if (
-                    code == TB_THUMBPOSITION ||
-                    code == TB_ENDTRACK ||
-                    code == TB_LINEUP ||
-                    code == TB_LINEDOWN ||
-                    code == TB_PAGEUP ||
-                    code == TB_PAGEDOWN
-                ) {
-                    media_player_user_seeking = true;
-
-                    if (
-                        media_player_get_time(
-                            &position,
-                            &duration
-                        ) &&
-                        duration > 0
-                    ) {
-                        media_player_set_position_v2(
-                            duration *
-                            slider /
-                            1000LL
-                        );
-                    }
-
-                    media_player_user_seeking = false;
-                    return 0;
-                }
-
-                return 0;
-            }'''
-
-    if old_seek_branch not in proc:
-        raise SystemExit("Could not locate Media player seek WM_HSCROLL branch for v4.")
-
-    proc = proc.replace(
-        old_seek_branch,
-        new_seek_branch,
-        1,
-    )
-
-    s = s[:proc_start] + proc + s[proc_end:]
-
-    # -------------------------------------------------------------------------
-    # Graphical inline audio player. It is an actual bitmap/OLE object inside
-    # RichEdit, so it scrolls naturally with the message and remains visually
-    # part of the chat. Mouse hit-testing is done against that object.
-    # -------------------------------------------------------------------------
-    visual_signature = "static void media_inline_audio_apply_visual(\n    bool force\n) {"
-    visual_pos = s.find(visual_signature)
-    if visual_pos < 0:
-        raise SystemExit("Could not locate v3 inline audio visual function.")
-
-    graphical_helpers = r'''
-static void media_player_queue_chat_autoplay(const wchar_t* path);
-
-HBITMAP media_inline_audio_make_bitmap(
-    int duration_seconds,
-    LONGLONG position_100ns,
-    bool playing,
-    int volume
-) {
-    const int width = 330;
-    const int height = 54;
-
-    if (duration_seconds < 0)
-        duration_seconds = 0;
-
-    if (volume < 0)
-        volume = 0;
-    if (volume > 100)
-        volume = 100;
-
-    LONGLONG total_100ns =
-        (LONGLONG)duration_seconds *
-        10000000LL;
-
-    if (position_100ns < 0)
-        position_100ns = 0;
+    // If this user currently has no avatar but has older photos, show the
+    // first available gallery entry instead of the empty placeholder.
     if (
-        total_100ns > 0 &&
-        position_100ns > total_100ns
+        profile_gallery_peer &&
+        !read_le(profile_gallery_peer->photo, 8) &&
+        !profile_gallery_photos.empty()
     ) {
-        position_100ns = total_100ns;
+        profile_gallery_request_selected(&dcInfoMain);
     }
-
-    HWND owner =
-        chat
-            ? chat
-            : hMain;
-
-    HDC screen =
-        GetDC(owner);
-
-    if (!screen)
-        return NULL;
-
-    HBITMAP bitmap =
-        CreateCompatibleBitmap(
-            screen,
-            width,
-            height
-        );
-
-    HDC dc =
-        CreateCompatibleDC(screen);
-
-    ReleaseDC(owner, screen);
-
-    if (!bitmap || !dc) {
-        if (bitmap)
-            DeleteObject(bitmap);
-        if (dc)
-            DeleteDC(dc);
-        return NULL;
-    }
-
-    HGDIOBJ old_bitmap =
-        SelectObject(dc, bitmap);
-
-    RECT outer = {
-        0,
-        0,
-        width,
-        height
-    };
-
-    FillRect(
-        dc,
-        &outer,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-
-    DrawEdge(
-        dc,
-        &outer,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    RECT play = {
-        7,
-        10,
-        41,
-        44
-    };
-
-    FillRect(
-        dc,
-        &play,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-
-    DrawEdge(
-        dc,
-        &play,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    COLORREF glyph_color =
-        GetSysColor(COLOR_BTNTEXT);
-
-    HBRUSH glyph_brush =
-        CreateSolidBrush(glyph_color);
-
-    HPEN glyph_pen =
-        CreatePen(
-            PS_SOLID,
-            1,
-            glyph_color
-        );
-
-    HGDIOBJ old_brush =
-        SelectObject(dc, glyph_brush);
-
-    HGDIOBJ old_pen =
-        SelectObject(dc, glyph_pen);
-
-    if (playing) {
-        Rectangle(dc, 17, 17, 22, 37);
-        Rectangle(dc, 27, 17, 32, 37);
-    } else {
-        POINT triangle[3] = {
-            {18, 16},
-            {18, 38},
-            {33, 27}
-        };
-
-        Polygon(
-            dc,
-            triangle,
-            3
-        );
-    }
-
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(glyph_pen);
-    DeleteObject(glyph_brush);
-
-    // Seek track.
-    RECT seek_track = {
-        53,
-        12,
-        228,
-        22
-    };
-
-    FillRect(
-        dc,
-        &seek_track,
-        GetSysColorBrush(COLOR_WINDOW)
-    );
-
-    DrawEdge(
-        dc,
-        &seek_track,
-        EDGE_SUNKEN,
-        BF_RECT
-    );
-
-    int seek_x = seek_track.left + 3;
-
-    if (total_100ns > 0) {
-        seek_x +=
-            (int)(
-                position_100ns *
-                (seek_track.right - seek_track.left - 7) /
-                total_100ns
-            );
-    }
-
-    RECT seek_thumb = {
-        seek_x,
-        seek_track.top - 3,
-        seek_x + 7,
-        seek_track.bottom + 3
-    };
-
-    FillRect(
-        dc,
-        &seek_thumb,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-
-    DrawEdge(
-        dc,
-        &seek_thumb,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    // Volume track.
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(
-        dc,
-        GetSysColor(COLOR_BTNTEXT)
-    );
-
-    HFONT font =
-        (HFONT)GetStockObject(
-            DEFAULT_GUI_FONT
-        );
-
-    HGDIOBJ old_font =
-        SelectObject(dc, font);
-
-    TextOutW(
-        dc,
-        238,
-        10,
-        L"Vol",
-        3
-    );
-
-    RECT volume_track = {
-        266,
-        12,
-        319,
-        22
-    };
-
-    FillRect(
-        dc,
-        &volume_track,
-        GetSysColorBrush(COLOR_WINDOW)
-    );
-
-    DrawEdge(
-        dc,
-        &volume_track,
-        EDGE_SUNKEN,
-        BF_RECT
-    );
-
-    int volume_x =
-        volume_track.left + 3 +
-        volume *
-        (volume_track.right - volume_track.left - 7) /
-        100;
-
-    RECT volume_thumb = {
-        volume_x,
-        volume_track.top - 3,
-        volume_x + 7,
-        volume_track.bottom + 3
-    };
-
-    FillRect(
-        dc,
-        &volume_thumb,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-
-    DrawEdge(
-        dc,
-        &volume_thumb,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    int current_seconds =
-        (int)(
-            position_100ns /
-            10000000LL
-        );
-
-    wchar_t time_text[64] = {0};
-
-    _snwprintf(
-        time_text,
-        ARRAYSIZE(time_text) - 1,
-        L"%02d:%02d / %02d:%02d",
-        current_seconds / 60,
-        current_seconds % 60,
-        duration_seconds / 60,
-        duration_seconds % 60
-    );
-
-    TextOutW(
-        dc,
-        53,
-        31,
-        time_text,
-        (int)wcslen(time_text)
-    );
-
-    SelectObject(dc, old_font);
-    SelectObject(dc, old_bitmap);
-    DeleteDC(dc);
-
-    return bitmap;
-}
-
-static bool media_inline_audio_replace_bitmap(
-    int document_index,
-    LONGLONG position,
-    LONGLONG duration,
-    bool playing
-) {
-    if (
-        !chat ||
-        document_index < 0 ||
-        document_index >=
-            (int)documents.size()
-    ) {
-        return false;
-    }
-
-    Document* document =
-        &documents[document_index];
-
-    if (
-        !document->filename ||
-        !media_player_is_music_path(
-            document->filename
-        ) ||
-        document->max <=
-            document->min
-    ) {
-        return false;
-    }
-
-    int object_pos =
-        document->max - 1;
-
-    int text_length =
-        (int)SendMessageW(
-            chat,
-            WM_GETTEXTLENGTH,
-            0,
-            0
-        );
-
-    if (
-        object_pos < 0 ||
-        object_pos >= text_length
-    ) {
-        return false;
-    }
-
-    int duration_seconds =
-        duration > 0
-            ? (int)(
-                duration /
-                10000000LL
-            )
-            : 0;
-
-    HBITMAP bitmap =
-        media_inline_audio_make_bitmap(
-            duration_seconds,
-            position,
-            playing,
-            media_inline_audio_volume
-        );
-
-    if (!bitmap)
-        return false;
-
-    CHARRANGE saved = {0};
-    SendMessageW(
-        chat,
-        EM_EXGETSEL,
-        0,
-        (LPARAM)&saved
-    );
-
-    SendMessageW(
-        chat,
-        WM_SETREDRAW,
-        FALSE,
-        0
-    );
-
-    SendMessageW(
-        chat,
-        EM_SETSEL,
-        object_pos,
-        object_pos + 1
-    );
-
-    SendMessageW(
-        chat,
-        EM_REPLACESEL,
-        FALSE,
-        (LPARAM)L""
-    );
-
-    insert_image(
-        chat,
-        NULL,
-        bitmap
-    );
-
-    DeleteObject(bitmap);
-
-    SendMessageW(
-        chat,
-        EM_EXSETSEL,
-        0,
-        (LPARAM)&saved
-    );
-
-    SendMessageW(
-        chat,
-        WM_SETREDRAW,
-        TRUE,
-        0
-    );
-
-    POINTL point = {0};
-    SendMessageW(
-        chat,
-        EM_POSFROMCHAR,
-        (WPARAM)&point,
-        object_pos
-    );
-
-    RECT player_rect = {
-        point.x,
-        point.y,
-        point.x + 330,
-        point.y + 54
-    };
-
-    InvalidateRect(
-        chat,
-        &player_rect,
-        FALSE
-    );
-
-    return true;
-}
-
-static bool media_inline_audio_file_ready(
-    Document* document
-) {
-    if (
-        !document ||
-        !document->filename
-    ) {
-        return false;
-    }
-
-    FILE* f =
-        _wfopen(
-            document->filename,
-            L"rb"
-        );
-
-    if (!f)
-        return false;
-
-    _fseeki64(f, 0, SEEK_END);
-    __int64 size = _ftelli64(f);
-    fclose(f);
-
-    return
-        document->size <= 0 ||
-        size == document->size;
-}
-
-static bool media_inline_audio_begin_or_toggle(
-    int document_index
-) {
-    if (
-        document_index < 0 ||
-        document_index >=
-            (int)documents.size()
-    ) {
-        return false;
-    }
-
-    Document* document =
-        &documents[document_index];
-
-    if (
-        !document->filename ||
-        !media_player_is_music_path(
-            document->filename
-        )
-    ) {
-        return false;
-    }
-
-    if (media_inline_audio_file_ready(document)) {
-        bool result =
-            media_inline_audio_toggle(
-                document->filename
-            );
-
-        return result;
-    }
-
-    media_player_queue_chat_autoplay(
-        document->filename
-    );
-
-    for (
-        int i = 0;
-        i < (int)downloading_docs.size();
-        i++
-    ) {
-        if (
-            memcmp(
-                document->id,
-                downloading_docs[i].id,
-                8
-            ) == 0
-        ) {
-            return true;
-        }
-    }
-
-    DeleteFileW(
-        document->filename
-    );
-
-    Document copy =
-        *document;
-
-    copy.filename =
-        _wcsdup(
-            document->filename
-        );
-
-    int file_ref_len =
-        document->file_reference
-            ? tlstr_len(
-                document->file_reference,
-                true
-            )
-            : 0;
-
-    copy.file_reference = NULL;
-
-    if (file_ref_len > 0) {
-        copy.file_reference =
-            (BYTE*)malloc(
-                file_ref_len
-            );
-
-        if (copy.file_reference) {
-            memcpy(
-                copy.file_reference,
-                document->file_reference,
-                file_ref_len
-            );
-        }
-    }
-
-    if (
-        !copy.filename ||
-        (
-            file_ref_len > 0 &&
-            !copy.file_reference
-        )
-    ) {
-        free(copy.filename);
-        free(copy.file_reference);
-        return false;
-    }
-
-    downloading_docs.push_back(copy);
-
-    download_file(
-        &dcInfoMain,
-        &downloading_docs.back()
-    );
-
-    return true;
-}
-
-static bool media_inline_audio_get_player_rect(
-    int document_index,
-    RECT* rect
-) {
-    if (
-        !chat ||
-        !rect ||
-        document_index < 0 ||
-        document_index >=
-            (int)documents.size()
-    ) {
-        return false;
-    }
-
-    Document* document =
-        &documents[document_index];
-
-    if (
-        !document->filename ||
-        !media_player_is_music_path(
-            document->filename
-        ) ||
-        document->max <=
-            document->min
-    ) {
-        return false;
-    }
-
-    int object_pos =
-        document->max - 1;
-
-    POINTL point = {0};
-
-    SendMessageW(
-        chat,
-        EM_POSFROMCHAR,
-        (WPARAM)&point,
-        object_pos
-    );
-
-    rect->left = point.x;
-    rect->top = point.y;
-    rect->right = point.x + 330;
-    rect->bottom = point.y + 54;
-
-    return true;
-}
-
-static void media_inline_audio_set_seek_from_x(
-    int document_index,
-    int x
-) {
-    if (
-        !media_inline_audio ||
-        document_index < 0 ||
-        document_index >=
-            (int)documents.size()
-    ) {
-        return;
-    }
-
-    Document* document =
-        &documents[document_index];
-
-    if (
-        !document->filename ||
-        _wcsicmp(
-            document->filename,
-            media_inline_audio_path
-        ) != 0
-    ) {
-        return;
-    }
-
-    PROPVARIANT duration_value = {0};
-
-    if (
-        FAILED(
-            media_inline_audio->GetDuration(
-                MFP_POSITIONTYPE_100NS,
-                &duration_value
-            )
-        ) ||
-        duration_value.vt != VT_I8 ||
-        duration_value.hVal.QuadPart <= 0
-    ) {
-        return;
-    }
-
-    int relative = x - 53;
-    if (relative < 0)
-        relative = 0;
-    if (relative > 175)
-        relative = 175;
-
-    LONGLONG target =
-        duration_value.hVal.QuadPart *
-        relative /
-        175LL;
-
-    PROPVARIANT value = {0};
-    value.vt = VT_I8;
-    value.hVal.QuadPart = target;
-
-    HRESULT hr =
-        media_inline_audio->SetPosition(
-            MFP_POSITIONTYPE_100NS,
-            &value
-        );
 
     diag_log(
-        "inline audio seek target=%I64d hr=0x%08X",
-        target,
-        (unsigned int)hr
+        "profile gallery loaded count=%d",
+        (int)profile_gallery_photos.size()
     );
 
-    media_inline_audio_last_second = -1;
-    media_inline_audio_apply_visual(true);
+    return true;
 }
 
-static void media_inline_audio_set_volume_from_x(
-    int document_index,
-    int x
+bool profile_gallery_handle_upload(
+    const BYTE* request_id,
+    BYTE* response,
+    int length
 ) {
-    int relative = x - 266;
-    if (relative < 0)
-        relative = 0;
-    if (relative > 53)
-        relative = 53;
+    if (!request_id || memcmp(request_id, profile_gallery_file_msgid, 8) != 0)
+        return false;
 
-    media_inline_audio_volume =
-        relative *
-        100 /
-        53;
+    memset(profile_gallery_file_msgid, 0, sizeof(profile_gallery_file_msgid));
+    profile_gallery_loading = false;
 
-    if (media_inline_audio) {
-        media_inline_audio->SetVolume(
-            (float)media_inline_audio_volume /
-            100.0f
+    if (
+        !profile_gallery_active ||
+        !profile_gallery_picture ||
+        !IsWindow(profile_gallery_picture) ||
+        !response ||
+        length < 16
+    ) {
+        profile_gallery_update_controls();
+        return true;
+    }
+
+    int bytes_len = tlstr_len(response + 12, false);
+    int header = bytes_len >= 254 ? 4 : 1;
+    if (bytes_len <= 0 || 12 + header + bytes_len > length) {
+        profile_gallery_update_controls();
+        return true;
+    }
+
+    HBITMAP bitmap = jpg_to_bmp(response + 12 + header, bytes_len);
+    if (bitmap) {
+        HBITMAP old = (HBITMAP)SendMessageW(
+            profile_gallery_picture,
+            STM_SETIMAGE,
+            IMAGE_BITMAP,
+            (LPARAM)bitmap
         );
+
+        if (old && old != bitmap)
+            DeleteObject(old);
     }
 
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-    bool playing = false;
-
-    if (
-        media_inline_audio &&
-        document_index >= 0 &&
-        document_index <
-            (int)documents.size() &&
-        documents[document_index].filename &&
-        _wcsicmp(
-            documents[document_index].filename,
-            media_inline_audio_path
-        ) == 0
-    ) {
-        PROPVARIANT p = {0};
-        PROPVARIANT d = {0};
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        media_inline_audio->GetState(&state);
-        playing =
-            state ==
-            MFP_MEDIAPLAYER_STATE_PLAYING;
-
-        if (
-            SUCCEEDED(
-                media_inline_audio->GetPosition(
-                    MFP_POSITIONTYPE_100NS,
-                    &p
-                )
-            ) &&
-            p.vt == VT_I8
-        ) {
-            position = p.hVal.QuadPart;
-        }
-
-        if (
-            SUCCEEDED(
-                media_inline_audio->GetDuration(
-                    MFP_POSITIONTYPE_100NS,
-                    &d
-                )
-            ) &&
-            d.vt == VT_I8
-        ) {
-            duration = d.hVal.QuadPart;
-        }
-    }
-
-    media_inline_audio_replace_bitmap(
-        document_index,
-        position,
-        duration,
-        playing
-    );
+    profile_gallery_update_controls();
+    return true;
 }
 
-bool media_inline_audio_handle_chat_mouse(
-    HWND hWnd,
-    UINT msg,
-    WPARAM wParam,
-    LPARAM lParam
+bool profile_gallery_retry_download(
+    const BYTE* request_id,
+    DCInfo* dcInfo
 ) {
-    if (!chat || hWnd != chat)
-        return false;
-
-    POINT point = {
-        GET_X_LPARAM(lParam),
-        GET_Y_LPARAM(lParam)
-    };
-
     if (
-        msg == WM_MOUSEMOVE &&
-        media_inline_audio_drag_mode != 0 &&
-        media_inline_audio_drag_document >= 0
-    ) {
-        RECT player = {0};
-
-        if (
-            !media_inline_audio_get_player_rect(
-                media_inline_audio_drag_document,
-                &player
-            )
-        ) {
-            return false;
-        }
-
-        int relative_x =
-            point.x -
-            player.left;
-
-        if (media_inline_audio_drag_mode == 1) {
-            media_inline_audio_set_seek_from_x(
-                media_inline_audio_drag_document,
-                relative_x
-            );
-        } else if (
-            media_inline_audio_drag_mode == 2
-        ) {
-            media_inline_audio_set_volume_from_x(
-                media_inline_audio_drag_document,
-                relative_x
-            );
-        }
-
-        return true;
-    }
-
-    if (
-        msg == WM_LBUTTONUP &&
-        media_inline_audio_drag_mode != 0
-    ) {
-        media_inline_audio_drag_mode = 0;
-        media_inline_audio_drag_document = -1;
-
-        if (GetCapture() == chat)
-            ReleaseCapture();
-
-        return true;
-    }
-
-    if (
-        msg != WM_LBUTTONDOWN &&
-        msg != WM_LBUTTONDBLCLK
+        !request_id ||
+        !dcInfo ||
+        memcmp(request_id, profile_gallery_file_msgid, 8) != 0
     ) {
         return false;
     }
 
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        RECT player = {0};
+    return profile_gallery_request_selected(dcInfo);
+}
 
-        if (!media_inline_audio_get_player_rect(i, &player))
-            continue;
-
-        if (!PtInRect(&player, point))
-            continue;
-
-        // Swallow the second click of a double click.  The first button-down
-        // already performed the desired action.
-        if (msg == WM_LBUTTONDBLCLK)
-            return true;
-
-        int x =
-            point.x -
-            player.left;
-
-        int y =
-            point.y -
-            player.top;
-
-        if (
-            x >= 7 &&
-            x <= 41 &&
-            y >= 8 &&
-            y <= 46
-        ) {
-            media_inline_audio_begin_or_toggle(i);
-            return true;
-        }
-
-        if (
-            x >= 49 &&
-            x <= 232 &&
-            y >= 5 &&
-            y <= 29
-        ) {
-            if (
-                !media_inline_audio ||
-                !media_inline_audio_path[0] ||
-                _wcsicmp(
-                    documents[i].filename,
-                    media_inline_audio_path
-                ) != 0
-            ) {
-                media_inline_audio_begin_or_toggle(i);
-            }
-
-            media_inline_audio_drag_mode = 1;
-            media_inline_audio_drag_document = i;
-            SetCapture(chat);
-
-            media_inline_audio_set_seek_from_x(
-                i,
-                x
-            );
-
-            return true;
-        }
-
-        if (
-            x >= 262 &&
-            x <= 322 &&
-            y >= 5 &&
-            y <= 29
-        ) {
-            media_inline_audio_drag_mode = 2;
-            media_inline_audio_drag_document = i;
-            SetCapture(chat);
-
-            media_inline_audio_set_volume_from_x(
-                i,
-                x
-            );
-
-            return true;
-        }
-
-        // The rest of the panel is deliberately inert but still belongs to
-        // the embedded player, so don't let RichEdit treat it as a selection.
-        return true;
-    }
-
-    return false;
+bool profile_gallery_showing_current() {
+    return !profile_gallery_active || profile_gallery_index == 0;
 }
 
 '''
+s = s[:insert_pos] + helpers_code + s[insert_pos:]
+write(helpers, s)
 
-    s = s[:visual_pos] + graphical_helpers + s[visual_pos:]
-
-    visual_v4 = r'''static void media_inline_audio_apply_visual(
-    bool force
-) {
-    if (
-        !chat ||
-        !media_inline_audio ||
-        !media_inline_audio_path[0]
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    PROPVARIANT p = {0};
-    PROPVARIANT d = {0};
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    if (
-        SUCCEEDED(
-            media_inline_audio->GetPosition(
-                MFP_POSITIONTYPE_100NS,
-                &p
-            )
-        ) &&
-        p.vt == VT_I8
-    ) {
-        position = p.hVal.QuadPart;
-    }
-
-    if (
-        SUCCEEDED(
-            media_inline_audio->GetDuration(
-                MFP_POSITIONTYPE_100NS,
-                &d
-            )
-        ) &&
-        d.vt == VT_I8
-    ) {
-        duration = d.hVal.QuadPart;
-    }
-
-    // Redraw at 2 Hz.  This is smooth enough for a small Win98-style player
-    // while avoiding constant OLE bitmap replacement in the RichEdit.
-    int visual_tick =
-        (int)(
-            position /
-            5000000LL
-        );
-
-    if (
-        !force &&
-        visual_tick ==
-            media_inline_audio_last_second
-    ) {
-        return;
-    }
-
-    media_inline_audio_last_second =
-        visual_tick;
-
-    bool playing =
-        state ==
-        MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        if (
-            !documents[i].filename ||
-            _wcsicmp(
-                documents[i].filename,
-                media_inline_audio_path
-            ) != 0
-        ) {
-            continue;
-        }
-
-        media_inline_audio_replace_bitmap(
-            i,
-            position,
-            duration,
-            playing
-        );
-        break;
-    }
-}'''
-
-    s = replace_function(
-        s,
-        visual_signature,
-        visual_v4,
-    )
-
-    # Respect the user-selected inline volume whenever a new track is opened.
-    volume_old = "media_inline_audio->SetVolume(0.85f);"
-    volume_new = r'''media_inline_audio->SetVolume(
-            (float)media_inline_audio_volume /
-            100.0f
-        );'''
-    if volume_old in s:
-        s = s.replace(volume_old, volume_new, 1)
-
-write(t, s)
-
-
-# -----------------------------------------------------------------------------
-# message.cpp: replace the symbolic second line with an actual OLE bitmap.
-# -----------------------------------------------------------------------------
+# =============================================================================
+# message.cpp — remember the sender behind each visible message header
+# =============================================================================
 s = read(m)
 
-if "media_inline_graphic_v4" not in s:
-    flags_anchor = "bool voice = false, gif = false, round = false, sticker = false, music = false, video = false, video_has_thumb = false; // media_inline_music_row_v2"
-    if flags_anchor not in s:
-        raise SystemExit("Could not locate v3 document flags for graphical audio player.")
+sender_anchor = '''\tbool chat_member_found = true;\n\twchar_t* sender = current_peer->name;'''
+if sender_anchor not in s:
+    raise SystemExit("Could not locate sender-resolution block in message.cpp.")
 
-    s = s.replace(
-        flags_anchor,
-        flags_anchor
-        + "\n\t\tint media_duration_seconds = 0; // media_inline_graphic_v4",
-        1,
-    )
+sender_new = '''\tBYTE profile_sender_id[8] = {0};\n\tchar profile_sender_type = -1;\n\tbool profile_sender_valid = false;\n\n\tif (message.outgoing) {\n\t\tmemcpy(profile_sender_id, myself.id, 8);\n\t\tprofile_sender_type = 0;\n\t\tprofile_sender_valid = true;\n\t} else if (current_peer && current_peer->type == 0) {\n\t\tmemcpy(profile_sender_id, current_peer->id, 8);\n\t\tprofile_sender_type = 0;\n\t\tprofile_sender_valid = true;\n\t} else if (chat_member_id) {\n\t\tmemcpy(profile_sender_id, chat_member_id, 8);\n\t\tunsigned int from_constructor = (unsigned int)read_le(chat_member_id - 4, 4);\n\t\tif (from_constructor == 0x59511722) profile_sender_type = 0;\n\t\telse if (from_constructor == 0x36c6019a) profile_sender_type = 1;\n\t\telse if (from_constructor == 0xa2a5371e) profile_sender_type = 2;\n\t\telse if (current_peer->type == 1) profile_sender_type = 0;\n\t\tprofile_sender_valid = profile_sender_type >= 0;\n\t}\n\n\tbool chat_member_found = true;\n\twchar_t* sender = current_peer->name;'''
+s = s.replace(sender_anchor, sender_new, 1)
 
-    duration_anchor = '''\t\t\t\t\tif (duration < 3600) swprintf(duration_str, L" (%02d:%02d)", duration / 60, duration % 60);\n\t\t\t\t\telse swprintf(duration_str, L" (%02d:%02d:%02d)", duration / 3600, (duration / 60) % 60, duration % 60);'''
+position_anchor = '''\tmessage.start_char = cr_startmsg.cpMin;\n\tmessage.end_header = message.start_char + header_len;\n\tmessage.end_char = message.start_char + written - written_info;'''
+if position_anchor not in s:
+    raise SystemExit("Could not locate final Message positions in message.cpp.")
 
-    duration_new = duration_anchor + "\n\t\t\t\t\tmedia_duration_seconds = duration;"
-
-    if duration_anchor not in s:
-        raise SystemExit("Could not locate media duration formatting in message.cpp.")
-
-    s = s.replace(
-        duration_anchor,
-        duration_new,
-        1,
-    )
-
-    symbolic_old = r'''\t\t\tif (music)
-\t\t\t\twritten += riched_write(chat, L"[>] " );
-
-\t\t\twritten += riched_write(chat, document.filename);
-
-\t\t\tif (duration_str[0] == ' ')
-\t\t\t\twritten += riched_write(chat, &duration_str[0]);
-
-\t\t\twritten += riched_write(chat, &size_str[0]);
-
-\t\t\tif (music) {
-\t\t\t\twritten += riched_write(
-\t\t\t\t\tchat,
-\t\t\t\t\tL"\n    [--------------------] 00:00:00"
-\t\t\t\t);
-\t\t\t}
-
-\t\t\tdocument.max = cr_startmsg.cpMin + written;'''.replace('\\t', '\t')
-
-    graphic_new = r'''\t\t\twritten += riched_write(chat, document.filename);
-
-\t\t\tif (duration_str[0] == ' ')
-\t\t\t\twritten += riched_write(chat, &duration_str[0]);
-
-\t\t\twritten += riched_write(chat, &size_str[0]);
-
-\t\t\tif (music) {
-\t\t\t\twritten += riched_write(chat, L"\n");
-
-\t\t\t\tHBITMAP audio_player =
-\t\t\t\t\tmedia_inline_audio_make_bitmap(
-\t\t\t\t\t\tmedia_duration_seconds,
-\t\t\t\t\t\t0,
-\t\t\t\t\t\tfalse,
-\t\t\t\t\t\t85
-\t\t\t\t\t);
-
-\t\t\t\tif (audio_player) {
-\t\t\t\t\tinsert_image(
-\t\t\t\t\t\tchat,
-\t\t\t\t\t\tNULL,
-\t\t\t\t\t\taudio_player
-\t\t\t\t\t);
-
-\t\t\t\t\tDeleteObject(audio_player);
-\t\t\t\t\twritten++;
-\t\t\t\t}
-\t\t\t}
-
-\t\t\tdocument.max = cr_startmsg.cpMin + written;'''.replace('\\t', '\t')
-
-    if symbolic_old not in s:
-        raise SystemExit("Could not locate v3 symbolic inline-audio row.")
-
-    s = s.replace(
-        symbolic_old,
-        graphic_new,
-        1,
-    )
-
+position_new = '''\tmessage.start_char = cr_startmsg.cpMin;\n\tmessage.end_header = message.start_char + header_len;\n\tmessage.end_char = message.start_char + written - written_info;\n\tif (!service && header && profile_sender_valid && message.id) {\n\t\tprofile_nav_register_message_sender(\n\t\t\tmessage.id,\n\t\t\tprofile_sender_id,\n\t\t\tprofile_sender_type\n\t\t);\n\t}'''
+s = s.replace(position_anchor, position_new, 1)
 write(m, s)
 
-
-# -----------------------------------------------------------------------------
-# procs.cpp: let the graphical player receive mouse interaction before the
-# RichEdit consumes the click as selection/link activity.
-# -----------------------------------------------------------------------------
+# =============================================================================
+# procs.cpp — nickname clicks, participant list, profile photo arrows
+# =============================================================================
 s = read(p)
 
-if "media_inline_audio_handle_chat_mouse" not in s:
-    start, end = function_range(
-        s,
-        "LRESULT CALLBACK WndProcChat("
-    )
+global_anchor = "HWND color_edits[4] = {0};"
+if global_anchor not in s:
+    raise SystemExit("Could not locate procs.cpp globals.")
 
-    proc = s[start:end]
+procs_globals = r'''
 
-    proc_anchor = '''LRESULT CALLBACK WndProcChat(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {\n\tswitch (msg) {'''
+// profile_navigation_latvianghost_v1
+#define PROFILE_PREV_BUTTON 9101
+#define PROFILE_NEXT_BUTTON 9102
+#define PROFILE_MEMBERS_LIST 9103
+#define PROFILE_MEMBERS_TIMER 9104
 
-    proc_new = '''LRESULT CALLBACK WndProcChat(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {\n\tif (\n\t\t(msg == WM_LBUTTONDOWN ||\n\t\t msg == WM_LBUTTONUP ||\n\t\t msg == WM_LBUTTONDBLCLK ||\n\t\t msg == WM_MOUSEMOVE) &&\n\t\tmedia_inline_audio_handle_chat_mouse(\n\t\t\thWnd,\n\t\t\tmsg,\n\t\t\twParam,\n\t\t\tlParam\n\t\t)\n\t) {\n\t\treturn 0;\n\t}\n\n\tswitch (msg) {'''
+struct TelegacyMessageSenderRef {
+    int message_id;
+    BYTE peer_id[8];
+    char peer_type;
+};
 
-    if proc_anchor not in proc:
-        raise SystemExit("Could not locate WndProcChat prologue for v4.")
+static std::vector<TelegacyMessageSenderRef> profile_message_senders;
+static Peer* profile_dialog_peer = NULL;
+static HWND profile_members_list = NULL;
+static HWND profile_photo_previous = NULL;
+static HWND profile_photo_next = NULL;
+static HWND profile_photo_counter = NULL;
 
-    proc = proc.replace(
-        proc_anchor,
-        proc_new,
-        1,
-    )
+static void telegacy_open_peer_profile(Peer* peer);
 
-    s = s[:start] + proc + s[end:]
+void profile_nav_clear_message_senders() {
+    profile_message_senders.clear();
+}
 
+void profile_nav_register_message_sender(
+    int message_id,
+    const BYTE* peer_id,
+    char peer_type
+) {
+    if (!message_id || !peer_id || peer_type < 0)
+        return;
+
+    for (int i = 0; i < (int)profile_message_senders.size(); i++) {
+        if (profile_message_senders[i].message_id == message_id) {
+            memcpy(profile_message_senders[i].peer_id, peer_id, 8);
+            profile_message_senders[i].peer_type = peer_type;
+            return;
+        }
+    }
+
+    TelegacyMessageSenderRef item;
+    item.message_id = message_id;
+    memcpy(item.peer_id, peer_id, 8);
+    item.peer_type = peer_type;
+    profile_message_senders.push_back(item);
+
+    if (profile_message_senders.size() > 12000)
+        profile_message_senders.erase(profile_message_senders.begin());
+}
+
+static Peer* profile_nav_find_peer(
+    const BYTE* peer_id,
+    char peer_type
+) {
+    if (!peer_id)
+        return NULL;
+
+    if (peer_type == 0 && memcmp(myself.id, peer_id, 8) == 0)
+        return &myself;
+
+    if (
+        current_peer &&
+        current_peer->type == 1 &&
+        current_peer->chat_users
+    ) {
+        for (int i = 0; i < (int)current_peer->chat_users->size(); i++) {
+            Peer* candidate = &current_peer->chat_users->at(i);
+            if (
+                candidate->type == peer_type &&
+                memcmp(candidate->id, peer_id, 8) == 0
+            ) {
+                return candidate;
+            }
+        }
+    }
+
+    for (int i = 0; i < peers_count; i++) {
+        if (
+            peers[i].type == peer_type &&
+            memcmp(peers[i].id, peer_id, 8) == 0
+        ) {
+            return &peers[i];
+        }
+    }
+
+    if (
+        current_peer &&
+        current_peer->type == peer_type &&
+        memcmp(current_peer->id, peer_id, 8) == 0
+    ) {
+        return current_peer;
+    }
+
+    return NULL;
+}
+
+static Peer* profile_nav_sender_for_message(int message_id) {
+    for (int i = (int)profile_message_senders.size() - 1; i >= 0; i--) {
+        if (profile_message_senders[i].message_id == message_id) {
+            return profile_nav_find_peer(
+                profile_message_senders[i].peer_id,
+                profile_message_senders[i].peer_type
+            );
+        }
+    }
+    return NULL;
+}
+
+static void profile_dialog_fill_members() {
+    if (!profile_members_list || !profile_dialog_peer || profile_dialog_peer->type != 1)
+        return;
+
+    SendMessageW(profile_members_list, LB_RESETCONTENT, 0, 0);
+
+    if (!profile_dialog_peer->chat_users) {
+        int row = (int)SendMessageW(
+            profile_members_list,
+            LB_ADDSTRING,
+            0,
+            (LPARAM)L"\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0443\u0447\u0430\u0441\u0442\u043D\u0438\u043A\u043E\u0432..."
+        );
+        if (row >= 0)
+            SendMessageW(profile_members_list, LB_SETITEMDATA, row, (LPARAM)-1);
+        return;
+    }
+
+    if (profile_dialog_peer->chat_users->empty()) {
+        int row = (int)SendMessageW(
+            profile_members_list,
+            LB_ADDSTRING,
+            0,
+            (LPARAM)L"\u041D\u0435\u0442 \u0443\u0447\u0430\u0441\u0442\u043D\u0438\u043A\u043E\u0432"
+        );
+        if (row >= 0)
+            SendMessageW(profile_members_list, LB_SETITEMDATA, row, (LPARAM)-1);
+        return;
+    }
+
+    for (int i = 0; i < (int)profile_dialog_peer->chat_users->size(); i++) {
+        Peer* member = &profile_dialog_peer->chat_users->at(i);
+        const wchar_t* label = member->name && member->name[0]
+            ? member->name
+            : L"Unknown";
+        int row = (int)SendMessageW(
+            profile_members_list,
+            LB_ADDSTRING,
+            0,
+            (LPARAM)label
+        );
+        if (row >= 0)
+            SendMessageW(profile_members_list, LB_SETITEMDATA, row, i);
+    }
+}
+'''
+s = s.replace(global_anchor, global_anchor + procs_globals, 1)
+
+# Track the actual Peer rather than just dlg_peer's shallow copy.
+init_anchor = '''\t\tPeer* peer = (Peer*)lParam;\n\t\tdlg_peer = *peer;'''
+if init_anchor not in s:
+    raise SystemExit("Could not locate DlgProc WM_INITDIALOG peer setup.")
+s = s.replace(
+    init_anchor,
+    init_anchor + '''\n\t\tprofile_dialog_peer = peer;\n\t\tprofile_members_list = NULL;\n\t\tprofile_photo_previous = NULL;\n\t\tprofile_photo_next = NULL;\n\t\tprofile_photo_counter = NULL;''',
+    1,
+)
+
+# Add the participant panel / avatar navigation controls right after dlgPic.
+picture_anchor = '''\t\tdlgPic = CreateWindowEx(WS_EX_CLIENTEDGE, L"STATIC", NULL, WS_CHILD | WS_VISIBLE | SS_BITMAP | SS_NOTIFY, 10, 10, 160, 160, hDlg, NULL, NULL, NULL);'''
+if picture_anchor not in s:
+    raise SystemExit("Could not locate dlgPic creation in DlgProc.")
+
+picture_extra = r'''
+
+        if (peer->type == 0) {
+            profile_photo_previous = CreateWindowW(
+                L"BUTTON", L"<-",
+                WS_CHILD | WS_TABSTOP,
+                10, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_PREV_BUTTON, NULL, NULL
+            );
+            profile_photo_counter = CreateWindowW(
+                L"STATIC", L"",
+                WS_CHILD | SS_CENTER | SS_CENTERIMAGE,
+                56, 174, 68, 23,
+                hDlg, NULL, NULL, NULL
+            );
+            profile_photo_next = CreateWindowW(
+                L"BUTTON", L"->",
+                WS_CHILD | WS_TABSTOP,
+                128, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_NEXT_BUTTON, NULL, NULL
+            );
+
+            RECT wr;
+            GetWindowRect(hDlg, &wr);
+            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left,
+                wr.bottom - wr.top + 30,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        } else if (peer->type == 1) {
+            CreateWindowW(
+                L"STATIC", L"\u0423\u0447\u0430\u0441\u0442\u043D\u0438\u043A\u0438 (\u0434\u0432\u043E\u0439\u043D\u043E\u0439 \u0449\u0435\u043B\u0447\u043E\u043A \u2014 \u043F\u0440\u043E\u0444\u0438\u043B\u044C):",
+                WS_CHILD | WS_VISIBLE,
+                10, 184, 460, 18,
+                hDlg, NULL, NULL, NULL
+            );
+
+            profile_members_list = CreateWindowExW(
+                WS_EX_CLIENTEDGE,
+                L"LISTBOX",
+                L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+                    LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+                10, 202, 460, 112,
+                hDlg,
+                (HMENU)PROFILE_MEMBERS_LIST,
+                NULL,
+                NULL
+            );
+
+            RECT wr;
+            GetWindowRect(hDlg, &wr);
+            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left,
+                wr.bottom - wr.top + 145,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+
+            profile_dialog_fill_members();
+
+            if (!peer->chat_users) {
+                get_full_peer(peer);
+                SetTimer(hDlg, PROFILE_MEMBERS_TIMER, 300, NULL);
+            }
+        }
+'''
+s = s.replace(picture_anchor, picture_anchor + picture_extra, 1)
+
+# Start the avatar list only after the initial/current avatar request has been queued.
+focus_anchor = '''\t\tSetFocus(birthday);\n\t\tSetFocus(dlgPic);'''
+if focus_anchor not in s:
+    raise SystemExit("Could not locate profile focus anchor.")
+s = s.replace(
+    focus_anchor,
+    '''\t\tif (peer->type == 0) {\n\t\t\tprofile_gallery_begin(\n\t\t\t\tpeer,\n\t\t\t\tdlgPic,\n\t\t\t\tprofile_photo_previous,\n\t\t\t\tprofile_photo_next,\n\t\t\t\tprofile_photo_counter\n\t\t\t);\n\t\t}\n\n''' + focus_anchor,
+    1,
+)
+
+# Handle arrows and participant activation before legacy IDOK/STN_CLICKED logic.
+command_anchor = '''\tcase WM_COMMAND: {\n\t\tif (LOWORD(wParam) == IDOK) {'''
+if command_anchor not in s:
+    raise SystemExit("Could not locate DlgProc WM_COMMAND prologue.")
+command_new = r'''	case WM_COMMAND: {
+        if (LOWORD(wParam) == PROFILE_PREV_BUTTON) {
+            profile_gallery_step(-1);
+            return TRUE;
+        }
+        if (LOWORD(wParam) == PROFILE_NEXT_BUTTON) {
+            profile_gallery_step(1);
+            return TRUE;
+        }
+        if (
+            LOWORD(wParam) == PROFILE_MEMBERS_LIST &&
+            HIWORD(wParam) == LBN_DBLCLK &&
+            profile_dialog_peer &&
+            profile_dialog_peer->type == 1 &&
+            profile_dialog_peer->chat_users
+        ) {
+            int selected = (int)SendMessageW(
+                profile_members_list,
+                LB_GETCURSEL,
+                0,
+                0
+            );
+
+            if (
+                selected != LB_ERR &&
+                selected >= 0 &&
+                selected < (int)profile_dialog_peer->chat_users->size()
+            ) {
+                Peer* member = &profile_dialog_peer->chat_users->at(selected);
+                telegacy_open_peer_profile(member);
+                return TRUE;
+            }
+        }
+
+		if (LOWORD(wParam) == IDOK) {'''
+s = s.replace(command_anchor, command_new, 1)
+
+# Poll once while get_full_peer() fills a basic group's real vector.
+color_anchor = '''\tcase WM_CTLCOLORDLG:\n\tcase WM_CTLCOLORSTATIC:'''
+if color_anchor not in s:
+    raise SystemExit("Could not locate DlgProc color cases.")
+timer_case = r'''	case WM_TIMER:
+        if (wParam == PROFILE_MEMBERS_TIMER) {
+            if (
+                profile_dialog_peer &&
+                profile_dialog_peer->type == 1 &&
+                profile_dialog_peer->chat_users
+            ) {
+                KillTimer(hDlg, PROFILE_MEMBERS_TIMER);
+                profile_dialog_fill_members();
+            }
+            return TRUE;
+        }
+        break;
+'''
+s = s.replace(color_anchor, timer_case + color_anchor, 1)
+
+# Clean gallery state and list pointers before the HWNDs disappear.
+destroy_anchor = '''\tcase WM_DESTROY:\n\t\tif (dlgPic) {'''
+if destroy_anchor not in s:
+    raise SystemExit("Could not locate DlgProc WM_DESTROY.")
+s = s.replace(
+    destroy_anchor,
+    '''\tcase WM_DESTROY:\n\t\tKillTimer(hDlg, PROFILE_MEMBERS_TIMER);\n\t\tprofile_gallery_clear();\n\t\tprofile_dialog_peer = NULL;\n\t\tprofile_members_list = NULL;\n\t\tprofile_photo_previous = NULL;\n\t\tprofile_photo_next = NULL;\n\t\tprofile_photo_counter = NULL;\n\t\tif (dlgPic) {''',
+    1,
+)
+
+# Add one canonical helper for opening any resolved Peer in the existing DlgProc.
+dlg_start, dlg_end = function_range(s, "INT_PTR CALLBACK DlgProc(")
+open_helper = r'''
+
+static void telegacy_open_peer_profile(Peer* peer) {
+    if (!peer)
+        return;
+
+    BYTE buffer[24] = {0};
+    LONG dlgUnits = GetDialogBaseUnits();
+    DLGTEMPLATE* dlg = (DLGTEMPLATE*)buffer;
+    dlg->style = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME;
+    dlg->cx = MulDiv(490, 4, LOWORD(dlgUnits));
+    dlg->cy = MulDiv(180, 8, HIWORD(dlgUnits));
+
+    if (current_dialog && IsWindow(current_dialog))
+        DestroyWindow(current_dialog);
+
+    current_dialog = CreateDialogIndirectParamW(
+        GetModuleHandleW(NULL),
+        dlg,
+        hMain,
+        DlgProc,
+        (LPARAM)peer
+    );
+}
+'''
+s = s[:dlg_end] + open_helper + s[dlg_end:]
+
+# Clear sender references whenever chat contents are replaced.
+settext_anchor = '''\tcase WM_SETTEXT: {\n\t\tmessages.clear();'''
+if settext_anchor not in s:
+    raise SystemExit("Could not locate WndProcChat WM_SETTEXT.")
+s = s.replace(
+    settext_anchor,
+    '''\tcase WM_SETTEXT: {\n\t\tprofile_nav_clear_message_senders();\n\t\tmessages.clear();''',
+    1,
+)
+
+# Clickable sender headers. Keep media player's pre-switch mouse hook intact.
+click_anchor = '''\tcase WM_PAINT:\n\tcase WM_LBUTTONUP:\n\t\tHideCaret(hWnd);\n\t\tbreak;'''
+if click_anchor not in s:
+    raise SystemExit("Could not locate WndProcChat paint/click block.")
+click_new = r'''	case WM_PAINT:
+        HideCaret(hWnd);
+        break;
+    case WM_LBUTTONUP: {
+        HideCaret(hWnd);
+
+        CHARRANGE selection = {0};
+        SendMessageW(hWnd, EM_EXGETSEL, 0, (LPARAM)&selection);
+        if (selection.cpMin != selection.cpMax)
+            break;
+
+        POINT point = {
+            GET_X_LPARAM(lParam),
+            GET_Y_LPARAM(lParam)
+        };
+        int character = (int)SendMessageW(
+            hWnd,
+            EM_CHARFROMPOS,
+            0,
+            (LPARAM)&point
+        );
+
+        for (int i = (int)messages.size() - 1; i >= 0; i--) {
+            if (
+                character >= messages[i].start_char &&
+                character < messages[i].end_header
+            ) {
+                Peer* sender = profile_nav_sender_for_message(messages[i].id);
+                if (sender) {
+                    telegacy_open_peer_profile(sender);
+                    return 0;
+                }
+                break;
+            }
+        }
+        break;
+    }'''
+s = s.replace(click_anchor, click_new, 1)
 write(p, s)
 
+# =============================================================================
+# response.cpp — route photos.Photos and selected upload.file chunks
+# =============================================================================
+s = read(r)
 
-# -----------------------------------------------------------------------------
-# Final v4 verification
-# -----------------------------------------------------------------------------
-checks_v4 = {
+# DC migration retry: gallery first, then legacy current-avatar request.
+retry_anchor = '''\t\t\t\t\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {\n\t\t\t\t\t\t\tget_pfp(active_dc, current_peer);\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}'''
+if retry_anchor not in s:
+    raise SystemExit("Could not locate legacy pfp DC-migrate retry block.")
+retry_new = '''\t\t\t\t\t\tif (profile_gallery_retry_download(last_rpcresult_msgid, active_dc)) {\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {\n\t\t\t\t\t\t\tif (profile_gallery_showing_current() && current_dialog && IsWindow(current_dialog)) get_pfp(active_dc, &dlg_peer);\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}'''
+s = s.replace(retry_anchor, retry_new, 1)
+
+# upload.file: selected historical avatar is independent of Media/document queues.
+# Insert after Telegacy's migrated-DC idle timer so gallery downloads do not
+# keep an auxiliary DC connection alive forever.
+upload_anchor = '''\tcase 0x96a18d5: { // upload.file'''
+up = s.find(upload_anchor)
+if up < 0:
+    raise SystemExit("Could not locate upload.file response route.")
+
+timer_anchor = '''\t\tif (dcInfo != &dcInfoMain) SetTimer(hMain, 20 + dcInfo->dc, 60000, NULL);'''
+timer_pos = s.find(timer_anchor, up)
+if timer_pos < 0:
+    raise SystemExit("Could not locate upload.file migrated-DC timer.")
+insert_after_timer = timer_pos + len(timer_anchor)
+upload_hook = '''\n\t\tif (profile_gallery_handle_upload(last_rpcresult_msgid, unenc_response, length)) {\n\t\t\tbreak;\n\t\t}'''
+s = s[:insert_after_timer] + upload_hook + s[insert_after_timer:]
+
+# Legacy current-avatar response should not overwrite an older selected photo.
+pfp_anchor = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {\n\t\t\tHBITMAP hBmp = jpg_to_bmp(unenc_response + 16, tlstr_len(unenc_response + 12, false));\n\t\t\tSendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);\n\t\t\tbreak;\n\t\t}'''
+if pfp_anchor not in s:
+    raise SystemExit("Could not locate legacy pfp upload.file block.")
+pfp_new = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {\n\t\t\tif (profile_gallery_showing_current() && dlgPic && IsWindow(dlgPic)) {\n\t\t\t\tint bytes_len = tlstr_len(unenc_response + 12, false);\n\t\t\t\tint bytes_header = bytes_len >= 254 ? 4 : 1;\n\t\t\t\tHBITMAP hBmp = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);\n\t\t\t\tif (hBmp) {\n\t\t\t\t\tHBITMAP oldBmp = (HBITMAP)SendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);\n\t\t\t\t\tif (oldBmp && oldBmp != hBmp) DeleteObject(oldBmp);\n\t\t\t\t}\n\t\t\t}\n\t\t\tbreak;\n\t\t}'''
+s = s.replace(pfp_anchor, pfp_new, 1)
+
+# photos.getUserPhotos result. Insert before the existing photos.photo no-op.
+photos_anchor = '''\tcase 0x20212ca8: // photos.photo\n\t\tbreak;'''
+if photos_anchor not in s:
+    raise SystemExit("Could not locate photos.photo response route.")
+photos_new = '''\tcase 0x8dca6aa5: // photos.photos\n\tcase 0x15051f54: // photos.photosSlice\n\t\tprofile_gallery_handle_photos_response(last_rpcresult_msgid, unenc_response, length);\n\t\tbreak;\n\tcase 0x20212ca8: // photos.photo\n\t\tbreak;'''
+s = s.replace(photos_anchor, photos_new, 1)
+write(r, s)
+
+# =============================================================================
+# Verification
+# =============================================================================
+checks = {
     h: [
-        "media_tabs_av_v4",
-        "media_inline_audio_make_bitmap",
-        "media_inline_audio_handle_chat_mouse",
+        "profile_navigation_latvianghost_v1",
+        "profile_gallery_handle_photos_response",
+        "profile_nav_register_message_sender",
     ],
-    t: [
-        "media_tabs_av_runtime_v4",
-        "media_player_seek_hold_until",
-        "media player seek target=",
-        "media_inline_audio_make_bitmap(",
-        "media_inline_audio_handle_chat_mouse(",
-        "media_inline_audio_drag_mode",
+    helpers: [
+        "photos.getUserPhotos",
+        "profile_gallery_request_selected",
+        "profile_gallery_handle_upload",
+        "profile_gallery_step",
     ],
     m: [
-        "media_inline_graphic_v4",
-        "HBITMAP audio_player",
-        "media_inline_audio_make_bitmap(",
+        "profile_sender_id",
+        "profile_nav_register_message_sender",
     ],
     p: [
-        "media_inline_audio_handle_chat_mouse(",
+        "PROFILE_MEMBERS_LIST",
+        "profile_dialog_fill_members",
+        "telegacy_open_peer_profile",
+        "profile_nav_sender_for_message",
+        "profile_gallery_begin",
+    ],
+    r: [
+        "case 0x8dca6aa5",
+        "case 0x15051f54",
+        "profile_gallery_retry_download",
+        "profile_gallery_handle_upload",
     ],
 }
 
-for file_path, tokens in checks_v4.items():
-    text = read(file_path)
+for path, tokens in checks.items():
+    text = read(path)
     for token in tokens:
         if token not in text:
-            raise SystemExit(
-                f"Media v4 verification failed in {file_path.name}: {token}"
-            )
+            raise SystemExit(f"Profile navigation verification failed in {path.name}: {token}")
 
-print(
-    "Applied Media A/V v4: reliable video seek and graphical inline audio "
-    "player with draggable seek/volume controls."
-)
 
 
 # =============================================================================
-# Media A/V v5
-# - robust MFPlay duration/position decoding (VT_I8 + VT_UI8)
-# - reliable deferred seek for video and inline audio
-# - playback speed control for video and inline audio
+# v2 stability / layout fixes
 # =============================================================================
-
-s = read(t)
-
-if "media_tabs_av_runtime_v5" not in s:
-    global_anchor = "static int media_inline_audio_drag_document = -1;"
-    if global_anchor not in s:
-        raise SystemExit("Could not locate v4 media globals for v5.")
-
-    s = s.replace(
-        global_anchor,
-        global_anchor
-        + r'''
-
-// media_tabs_av_runtime_v5
-static HWND hMediaPlayerSpeed = NULL;
-static const float media_playback_rates[] = {
-    0.5f,
-    1.0f,
-    1.25f,
-    1.5f,
-    2.0f
-};
-static const wchar_t* media_playback_rate_labels[] = {
-    L"0.5x",
-    L"1.0x",
-    L"1.25x",
-    L"1.5x",
-    L"2.0x"
-};
-static int media_player_rate_index = 1;
-static int media_inline_audio_rate_index = 1;
-static int media_player_pending_seek_slider = -1;
-static LONGLONG media_player_cached_duration = 0;
-static LONGLONG media_inline_audio_cached_duration = 0;
-static LONGLONG media_inline_audio_drag_preview = 0;
-static bool media_inline_audio_seek_dirty = false;
-''',
-        1,
-    )
-
-    helper_pos = s.find("static bool media_player_get_time(")
-    if helper_pos < 0:
-        raise SystemExit("Could not locate media_player_get_time for v5 helpers.")
-
-    helpers_v5 = r'''
-static bool media_propvariant_to_hns(
-    const PROPVARIANT* value,
-    LONGLONG* out
-) {
-    if (!value || !out)
-        return false;
-
-    switch (value->vt) {
-        case VT_I8:
-            *out = value->hVal.QuadPart;
-            return true;
-
-        case VT_UI8:
-            *out = (LONGLONG)value->uhVal.QuadPart;
-            return true;
-
-        case VT_I4:
-            *out = (LONGLONG)value->lVal;
-            return true;
-
-        case VT_UI4:
-            *out = (LONGLONG)value->ulVal;
-            return true;
-    }
-
-    return false;
-}
-
-static void media_player_update_speed_button() {
-    if (!hMediaPlayerSpeed)
-        return;
-
-    int index = media_player_rate_index;
-    if (index < 0 || index >= ARRAYSIZE(media_playback_rate_labels))
-        index = 1;
-
-    SetWindowTextW(
-        hMediaPlayerSpeed,
-        media_playback_rate_labels[index]
-    );
-}
-
-static bool media_player_apply_rate_index(
-    int index
-) {
-    if (
-        index < 0 ||
-        index >= ARRAYSIZE(media_playback_rates)
-    ) {
-        return false;
-    }
-
-    float rate = media_playback_rates[index];
-    HRESULT hr = E_FAIL;
-
-    if (
-        media_player_backend == 1 &&
-        media_player_mf
-    ) {
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        media_player_mf->GetState(&state);
-
-        bool resume =
-            state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-        if (resume)
-            media_player_mf->Pause();
-
-        hr = media_player_mf->SetRate(rate);
-
-        if (resume && SUCCEEDED(hr))
-            media_player_mf->Play();
-    } else if (
-        media_player_backend == 2 &&
-        media_player_seeking
-    ) {
-        hr = media_player_seeking->SetRate((double)rate);
-    }
-
-    diag_log(
-        "media player speed rate=%.2f hr=0x%08X backend=%d",
-        rate,
-        (unsigned int)hr,
-        media_player_backend
-    );
-
-    if (FAILED(hr))
-        return false;
-
-    media_player_rate_index = index;
-    media_player_update_speed_button();
-    return true;
-}
-
-static void media_player_cycle_rate() {
-    int count = ARRAYSIZE(media_playback_rates);
-
-    for (int step = 1; step <= count; step++) {
-        int next =
-            (media_player_rate_index + step) % count;
-
-        if (media_player_apply_rate_index(next))
-            return;
-    }
-
-    MessageBeep(MB_ICONASTERISK);
-}
-
-static bool media_inline_audio_apply_rate_index(
-    int index
-) {
-    if (
-        index < 0 ||
-        index >= ARRAYSIZE(media_playback_rates)
-    ) {
-        return false;
-    }
-
-    media_inline_audio_rate_index = index;
-
-    if (!media_inline_audio)
-        return true;
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    bool resume =
-        state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    if (resume)
-        media_inline_audio->Pause();
-
-    float rate = media_playback_rates[index];
-    HRESULT hr = media_inline_audio->SetRate(rate);
-
-    if (resume && SUCCEEDED(hr))
-        media_inline_audio->Play();
-
-    diag_log(
-        "inline audio speed rate=%.2f hr=0x%08X",
-        rate,
-        (unsigned int)hr
-    );
-
-    if (SUCCEEDED(hr)) {
-        media_inline_audio_last_second = -1;
-        media_inline_audio_apply_visual(true);
-        return true;
-    }
-
-    return false;
-}
-
-static void media_inline_audio_cycle_rate() {
-    int count = ARRAYSIZE(media_playback_rates);
-
-    for (int step = 1; step <= count; step++) {
-        int next =
-            (media_inline_audio_rate_index + step) % count;
-
-        if (media_inline_audio_apply_rate_index(next))
-            return;
-    }
-
-    MessageBeep(MB_ICONASTERISK);
-}
-
-static bool media_inline_audio_get_times_v5(
-    LONGLONG* position,
-    LONGLONG* duration
-) {
-    if (!position || !duration || !media_inline_audio)
-        return false;
-
-    *position = 0;
-    *duration = 0;
-
-    PROPVARIANT p = {0};
-    PROPVARIANT d = {0};
-
-    HRESULT hp =
-        media_inline_audio->GetPosition(
-            MFP_POSITIONTYPE_100NS,
-            &p
-        );
-
-    HRESULT hd =
-        media_inline_audio->GetDuration(
-            MFP_POSITIONTYPE_100NS,
-            &d
-        );
-
-    bool have_position =
-        SUCCEEDED(hp) &&
-        media_propvariant_to_hns(&p, position);
-
-    bool have_duration =
-        SUCCEEDED(hd) &&
-        media_propvariant_to_hns(&d, duration) &&
-        *duration > 0;
-
-    if (have_duration)
-        media_inline_audio_cached_duration = *duration;
-    else if (media_inline_audio_cached_duration > 0) {
-        *duration = media_inline_audio_cached_duration;
-        have_duration = true;
-    }
-
-    return have_position && have_duration;
-}
-
-'''
-
-    s = s[:helper_pos] + helpers_v5 + s[helper_pos:]
-
-    get_time_v5 = r'''static bool media_player_get_time(
-    LONGLONG* position,
-    LONGLONG* duration
-) {
-    if (!position || !duration)
-        return false;
-
-    *position = 0;
-    *duration = 0;
-
-    if (
-        media_player_backend == 1 &&
-        media_player_mf
-    ) {
-        PROPVARIANT p = {0};
-        PROPVARIANT d = {0};
-
-        HRESULT hp =
-            media_player_mf->GetPosition(
-                MFP_POSITIONTYPE_100NS,
-                &p
-            );
-
-        HRESULT hd =
-            media_player_mf->GetDuration(
-                MFP_POSITIONTYPE_100NS,
-                &d
-            );
-
-        bool have_position =
-            SUCCEEDED(hp) &&
-            media_propvariant_to_hns(&p, position);
-
-        bool have_duration =
-            SUCCEEDED(hd) &&
-            media_propvariant_to_hns(&d, duration) &&
-            *duration > 0;
-
-        if (have_duration)
-            media_player_cached_duration = *duration;
-        else if (media_player_cached_duration > 0) {
-            *duration = media_player_cached_duration;
-            have_duration = true;
-        }
-
-        return have_position && have_duration;
-    }
-
-    if (
-        media_player_backend == 2 &&
-        media_player_seeking
-    ) {
-        bool ok =
-            SUCCEEDED(
-                media_player_seeking->GetCurrentPosition(
-                    position
-                )
-            ) &&
-            SUCCEEDED(
-                media_player_seeking->GetDuration(
-                    duration
-                )
-            ) &&
-            *duration > 0;
-
-        if (ok)
-            media_player_cached_duration = *duration;
-        else if (media_player_cached_duration > 0) {
-            *duration = media_player_cached_duration;
-            ok = true;
-        }
-
-        return ok;
-    }
-
-    return false;
-}'''
-    s = replace_function(s, "static bool media_player_get_time(", get_time_v5)
-
-    seek_v5 = r'''static void media_player_set_position_v2(
-    LONGLONG target
-) {
-    if (target < 0)
-        target = 0;
-
-    if (
-        media_player_cached_duration > 0 &&
-        target > media_player_cached_duration
-    ) {
-        target = media_player_cached_duration;
-    }
-
-    if (
-        media_player_backend == 1 &&
-        media_player_mf
-    ) {
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        media_player_mf->GetState(&state);
-
-        bool resume =
-            state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-        if (resume)
-            media_player_mf->Pause();
-
-        PROPVARIANT value = {0};
-        value.vt = VT_I8;
-        value.hVal.QuadPart = target;
-
-        HRESULT hr =
-            media_player_mf->SetPosition(
-                MFP_POSITIONTYPE_100NS,
-                &value
-            );
-
-        media_player_seek_hold_until =
-            GetTickCount() + 1400;
-
-        diag_log(
-            "media player seek commit target=%I64d hr=0x%08X resume=%d",
-            target,
-            (unsigned int)hr,
-            resume ? 1 : 0
-        );
-
-        if (resume && SUCCEEDED(hr))
-            media_player_mf->Play();
-
-        return;
-    }
-
-    if (
-        media_player_backend == 2 &&
-        media_player_seeking
-    ) {
-        HRESULT hr =
-            media_player_seeking->SetPositions(
-                &target,
-                AM_SEEKING_AbsolutePositioning,
-                NULL,
-                AM_SEEKING_NoPositioning
-            );
-
-        media_player_seek_hold_until =
-            GetTickCount() + 700;
-
-        diag_log(
-            "media player DirectShow seek commit target=%I64d hr=0x%08X",
-            target,
-            (unsigned int)hr
-        );
-    }
-}'''
-    s = replace_function(s, "static void media_player_set_position_v2(", seek_v5)
-
-    # Reset duration cache whenever the backend is released.
-    release_start, release_end = function_range(
-        s,
-        "static void media_player_release_graph()"
-    )
-    release_func = s[release_start:release_end]
-    release_anchor = "    media_player_backend = 0;"
-    if release_anchor not in release_func:
-        raise SystemExit("Could not locate media_player_backend reset for v5.")
-    release_func = release_func.replace(
-        release_anchor,
-        release_anchor
-        + "\n    media_player_cached_duration = 0;"
-        + "\n    media_player_pending_seek_slider = -1;"
-        + "\n    media_player_seek_hold_until = 0;",
-        1,
-    )
-    s = s[:release_start] + release_func + s[release_end:]
-
-    # Apply selected audio speed to every newly opened track.
-    toggle_start, toggle_end = function_range(
-        s,
-        "bool media_inline_audio_toggle("
-    )
-    toggle_func = s[toggle_start:toggle_end]
-    toggle_anchor = r'''        media_inline_audio->SetVolume(
-            (float)media_inline_audio_volume /
-            100.0f
-        );
-        hr = media_inline_audio->Play();'''
-    toggle_new = r'''        media_inline_audio->SetVolume(
-            (float)media_inline_audio_volume /
-            100.0f
-        );
-
-        HRESULT rate_hr =
-            media_inline_audio->SetRate(
-                media_playback_rates[
-                    media_inline_audio_rate_index
-                ]
-            );
-
-        diag_log(
-            "inline audio initial speed rate=%.2f hr=0x%08X",
-            media_playback_rates[
-                media_inline_audio_rate_index
-            ],
-            (unsigned int)rate_hr
-        );
-
-        hr = media_inline_audio->Play();'''
-    if toggle_anchor not in toggle_func:
-        raise SystemExit("Could not locate inline-audio open volume/play block for v5.")
-    toggle_func = toggle_func.replace(toggle_anchor, toggle_new, 1)
-    s = s[:toggle_start] + toggle_func + s[toggle_end:]
-
-    # Reset inline duration/drag state when the player is released.
-    audio_release_start, audio_release_end = function_range(
-        s,
-        "static void media_inline_audio_release()"
-    )
-    audio_release_func = s[audio_release_start:audio_release_end]
-    audio_release_anchor = "    media_inline_audio_last_second = -1;"
-    if audio_release_anchor not in audio_release_func:
-        raise SystemExit("Could not locate inline-audio release tail for v5.")
-    audio_release_func = audio_release_func.replace(
-        audio_release_anchor,
-        audio_release_anchor
-        + "\n    media_inline_audio_cached_duration = 0;"
-        + "\n    media_inline_audio_drag_preview = 0;"
-        + "\n    media_inline_audio_seek_dirty = false;",
-        1,
-    )
-    s = s[:audio_release_start] + audio_release_func + s[audio_release_end:]
-
-    # Apply selected video speed after either backend opens successfully.
-    open_start, open_end = function_range(
-        s,
-        "static bool media_player_open("
-    )
-    open_func = s[open_start:open_end]
-
-    mf_anchor = r'''        media_player_backend = 1;
-        media_player_mf->SetVolume(0.85f);
-        mf_hr = media_player_mf->Play();'''
-    mf_new = r'''        media_player_backend = 1;
-        media_player_mf->SetVolume(0.85f);
-
-        HRESULT rate_hr =
-            media_player_mf->SetRate(
-                media_playback_rates[
-                    media_player_rate_index
-                ]
-            );
-
-        diag_log(
-            "media player initial speed rate=%.2f hr=0x%08X",
-            media_playback_rates[
-                media_player_rate_index
-            ],
-            (unsigned int)rate_hr
-        );
-
-        mf_hr = media_player_mf->Play();'''
-    if mf_anchor not in open_func:
-        raise SystemExit("Could not locate MFPlay open block for v5.")
-    open_func = open_func.replace(mf_anchor, mf_new, 1)
-
-    ds_anchor = r'''        if (media_player_control)
-            media_player_control->Run();'''
-    ds_new = r'''        if (media_player_seeking) {
-            HRESULT rate_hr =
-                media_player_seeking->SetRate(
-                    (double)media_playback_rates[
-                        media_player_rate_index
-                    ]
-                );
-
-            diag_log(
-                "DirectShow initial speed rate=%.2f hr=0x%08X",
-                media_playback_rates[
-                    media_player_rate_index
-                ],
-                (unsigned int)rate_hr
-            );
-        }
-
-        if (media_player_control)
-            media_player_control->Run();'''
-    if ds_anchor not in open_func:
-        raise SystemExit("Could not locate DirectShow run block for v5.")
-    open_func = open_func.replace(ds_anchor, ds_new, 1)
-    s = s[:open_start] + open_func + s[open_end:]
-
-    # Video window: add a speed button and make seek commit exactly once on
-    # release, using the cached duration even if MFPlay momentarily returns an
-    # empty PROPVARIANT during the drag.
-    proc_start, proc_end = function_range(
-        s,
-        "static LRESULT CALLBACK TelegacyMediaPlayerWindow("
-    )
-    proc = s[proc_start:proc_end]
-
-    create_anchor = r'''            hMediaPlayerTime = CreateWindowW(
-                L"STATIC",
-                L"00:00 / 00:00",
-                WS_CHILD | WS_VISIBLE | SS_RIGHT | SS_CENTERIMAGE,
-                398, 324, 154, 24,
-                hwnd, (HMENU)13, NULL, NULL
-            );'''
-    create_new = create_anchor + r'''
-
-            hMediaPlayerSpeed = CreateWindowW(
-                L"BUTTON",
-                media_playback_rate_labels[
-                    media_player_rate_index
-                ],
-                WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
-                320, 324, 66, 24,
-                hwnd, (HMENU)17, NULL, NULL
-            );'''
-    if create_anchor not in proc:
-        raise SystemExit("Could not locate video time label creation for speed button.")
-    proc = proc.replace(create_anchor, create_new, 1)
-
-    font_anchor = "            SendMessageW(hMediaPlayerTime, WM_SETFONT, (WPARAM)font, TRUE);"
-    font_new = font_anchor + "\n            SendMessageW(hMediaPlayerSpeed, WM_SETFONT, (WPARAM)font, TRUE);"
-    if font_anchor not in proc:
-        raise SystemExit("Could not locate player font setup for v5.")
-    proc = proc.replace(font_anchor, font_new, 1)
-
-    size_anchor = r'''            MoveWindow(hMediaPlayerVolume, 152, controls_y, 160, 24, TRUE);
-            MoveWindow(hMediaPlayerTime, client_w - 162, controls_y, 154, 24, TRUE);'''
-    size_new = r'''            MoveWindow(hMediaPlayerVolume, 152, controls_y, 160, 24, TRUE);
-            MoveWindow(hMediaPlayerSpeed, 320, controls_y, 66, 24, TRUE);
-            MoveWindow(hMediaPlayerTime, client_w - 162, controls_y, 154, 24, TRUE);'''
-    if size_anchor not in proc:
-        raise SystemExit("Could not locate player control layout for speed button.")
-    proc = proc.replace(size_anchor, size_new, 1)
-
-    command_anchor = r'''                case 12:
-                    if (media_player_backend == 1 && media_player_mf)
-                        media_player_mf->Stop();
-                    else if (media_player_control) {
-                        media_player_control->Stop();
-                        media_player_set_position_v2(0);
-                    }
-                    media_player_update_controls();
-                    return 0;'''
-    command_new = command_anchor + r'''
-
-                case 17:
-                    media_player_cycle_rate();
-                    return 0;'''
-    if command_anchor not in proc:
-        raise SystemExit("Could not locate video stop command for speed command.")
-    proc = proc.replace(command_anchor, command_new, 1)
-
-    old_seek_start = proc.find("            if (source == hMediaPlayerSeek) {")
-    if old_seek_start < 0:
-        raise SystemExit("Could not locate video seek branch for v5.")
-    old_seek_end = proc.find("\n            if (source == hMediaPlayerVolume) {", old_seek_start)
-    if old_seek_end < 0:
-        raise SystemExit("Could not isolate video seek branch for v5.")
-
-    new_seek_branch = r'''            if (source == hMediaPlayerSeek) {
-                int code = LOWORD(wParam);
-                int slider =
-                    (int)SendMessageW(
-                        hMediaPlayerSeek,
-                        TBM_GETPOS,
-                        0,
-                        0
-                    );
-
-                LONGLONG position = 0;
-                LONGLONG duration = 0;
-                media_player_get_time(
-                    &position,
-                    &duration
-                );
-
-                if (duration <= 0)
-                    duration = media_player_cached_duration;
-
-                if (code == TB_THUMBTRACK) {
-                    media_player_user_seeking = true;
-                    media_player_pending_seek_slider = slider;
-
-                    if (
-                        duration > 0 &&
-                        hMediaPlayerTime
-                    ) {
-                        LONGLONG preview =
-                            duration *
-                            slider /
-                            1000LL;
-
-                        wchar_t now_text[32] = {0};
-                        wchar_t total_text[32] = {0};
-                        wchar_t combined[80] = {0};
-
-                        media_player_format_time(
-                            preview,
-                            now_text,
-                            ARRAYSIZE(now_text)
-                        );
-
-                        media_player_format_time(
-                            duration,
-                            total_text,
-                            ARRAYSIZE(total_text)
-                        );
-
-                        _snwprintf(
-                            combined,
-                            ARRAYSIZE(combined) - 1,
-                            L"%s / %s",
-                            now_text,
-                            total_text
-                        );
-
-                        SetWindowTextW(
-                            hMediaPlayerTime,
-                            combined
-                        );
-                    }
-
-                    return 0;
-                }
-
-                if (
-                    code == TB_THUMBPOSITION ||
-                    code == TB_ENDTRACK ||
-                    code == TB_LINEUP ||
-                    code == TB_LINEDOWN ||
-                    code == TB_PAGEUP ||
-                    code == TB_PAGEDOWN
-                ) {
-                    media_player_user_seeking = true;
-
-                    int committed_slider =
-                        media_player_pending_seek_slider >= 0
-                            ? media_player_pending_seek_slider
-                            : slider;
-
-                    if (duration > 0) {
-                        media_player_set_position_v2(
-                            duration *
-                            committed_slider /
-                            1000LL
-                        );
-
-                        SendMessageW(
-                            hMediaPlayerSeek,
-                            TBM_SETPOS,
-                            TRUE,
-                            committed_slider
-                        );
-                    }
-
-                    media_player_pending_seek_slider = -1;
-                    media_player_user_seeking = false;
-                    return 0;
-                }
-
-                return 0;
-            }'''
-
-    proc = proc[:old_seek_start] + new_seek_branch + proc[old_seek_end:]
-
-    destroy_anchor = "            hMediaPlayerTime = NULL;"
-    destroy_new = destroy_anchor + "\n            hMediaPlayerSpeed = NULL;"
-    if destroy_anchor not in proc:
-        raise SystemExit("Could not locate player destroy tail for speed control.")
-    proc = proc.replace(destroy_anchor, destroy_new, 1)
-
-    s = s[:proc_start] + proc + s[proc_end:]
-
-    # Inline graphical audio player: speed button in the lower-right corner.
-    bitmap_start, bitmap_end = function_range(
-        s,
-        "HBITMAP media_inline_audio_make_bitmap("
-    )
-    bitmap_func = s[bitmap_start:bitmap_end]
-
-    bitmap_anchor = r'''    TextOutW(
-        dc,
-        53,
-        31,
-        time_text,
-        (int)wcslen(time_text)
-    );'''
-    bitmap_new = bitmap_anchor + r'''
-
-    RECT speed_button = {
-        260,
-        30,
-        323,
-        50
-    };
-
-    FillRect(
-        dc,
-        &speed_button,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-
-    DrawEdge(
-        dc,
-        &speed_button,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    int rate_index = media_inline_audio_rate_index;
-    if (
-        rate_index < 0 ||
-        rate_index >= ARRAYSIZE(media_playback_rate_labels)
-    ) {
-        rate_index = 1;
-    }
-
-    RECT speed_text = speed_button;
-    DrawTextW(
-        dc,
-        media_playback_rate_labels[rate_index],
-        -1,
-        &speed_text,
-        DT_CENTER |
-        DT_VCENTER |
-        DT_SINGLELINE
-    );'''
-    if bitmap_anchor not in bitmap_func:
-        raise SystemExit("Could not locate inline audio time text for speed button.")
-    bitmap_func = bitmap_func.replace(bitmap_anchor, bitmap_new, 1)
-    s = s[:bitmap_start] + bitmap_func + s[bitmap_end:]
-
-    # Replace audio seek with a preview-during-drag / commit-on-release model.
-    audio_seek_start, audio_seek_end = function_range(
-        s,
-        "static void media_inline_audio_set_seek_from_x("
-    )
-    audio_seek_v5 = r'''static void media_inline_audio_set_seek_from_x(
-    int document_index,
-    int x
-) {
-    if (
-        !media_inline_audio ||
-        document_index < 0 ||
-        document_index >=
-            (int)documents.size()
-    ) {
-        return;
-    }
-
-    Document* document =
-        &documents[document_index];
-
-    if (
-        !document->filename ||
-        _wcsicmp(
-            document->filename,
-            media_inline_audio_path
-        ) != 0
-    ) {
-        return;
-    }
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    media_inline_audio_get_times_v5(
-        &position,
-        &duration
-    );
-
-    if (duration <= 0)
-        duration = media_inline_audio_cached_duration;
-
-    if (duration <= 0)
-        return;
-
-    int relative = x - 53;
-    if (relative < 0)
-        relative = 0;
-    if (relative > 175)
-        relative = 175;
-
-    media_inline_audio_drag_preview =
-        duration *
-        relative /
-        175LL;
-
-    media_inline_audio_seek_dirty = true;
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    media_inline_audio_replace_bitmap(
-        document_index,
-        media_inline_audio_drag_preview,
-        duration,
-        state == MFP_MEDIAPLAYER_STATE_PLAYING
-    );
-}
-
-static void media_inline_audio_commit_seek() {
-    if (
-        !media_inline_audio ||
-        !media_inline_audio_seek_dirty
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    bool resume =
-        state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    if (resume)
-        media_inline_audio->Pause();
-
-    PROPVARIANT value = {0};
-    value.vt = VT_I8;
-    value.hVal.QuadPart =
-        media_inline_audio_drag_preview;
-
-    HRESULT hr =
-        media_inline_audio->SetPosition(
-            MFP_POSITIONTYPE_100NS,
-            &value
-        );
-
-    diag_log(
-        "inline audio seek commit target=%I64d hr=0x%08X resume=%d",
-        media_inline_audio_drag_preview,
-        (unsigned int)hr,
-        resume ? 1 : 0
-    );
-
-    if (resume && SUCCEEDED(hr))
-        media_inline_audio->Play();
-
-    media_inline_audio_seek_dirty = false;
-    media_inline_audio_last_second = -1;
-    media_inline_audio_apply_visual(true);
-}'''
-    s = s[:audio_seek_start] + audio_seek_v5 + s[audio_seek_end:]
-
-    volume_start, volume_end = function_range(
-        s,
-        "static void media_inline_audio_set_volume_from_x("
-    )
-    volume_v5 = r'''static void media_inline_audio_set_volume_from_x(
-    int document_index,
-    int x
-) {
-    int relative = x - 266;
-    if (relative < 0)
-        relative = 0;
-    if (relative > 53)
-        relative = 53;
-
-    media_inline_audio_volume =
-        relative *
-        100 /
-        53;
-
-    if (media_inline_audio) {
-        media_inline_audio->SetVolume(
-            (float)media_inline_audio_volume /
-            100.0f
-        );
-    }
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-    bool playing = false;
-
-    if (
-        media_inline_audio &&
-        document_index >= 0 &&
-        document_index <
-            (int)documents.size() &&
-        documents[document_index].filename &&
-        _wcsicmp(
-            documents[document_index].filename,
-            media_inline_audio_path
-        ) == 0
-    ) {
-        media_inline_audio_get_times_v5(
-            &position,
-            &duration
-        );
-
-        MFP_MEDIAPLAYER_STATE state =
-            MFP_MEDIAPLAYER_STATE_EMPTY;
-
-        media_inline_audio->GetState(&state);
-        playing =
-            state == MFP_MEDIAPLAYER_STATE_PLAYING;
-    }
-
-    media_inline_audio_replace_bitmap(
-        document_index,
-        position,
-        duration,
-        playing
-    );
-}'''
-    s = s[:volume_start] + volume_v5 + s[volume_end:]
-
-    mouse_start, mouse_end = function_range(
-        s,
-        "bool media_inline_audio_handle_chat_mouse("
-    )
-    mouse_v5 = r'''bool media_inline_audio_handle_chat_mouse(
-    HWND hWnd,
-    UINT msg,
-    WPARAM wParam,
-    LPARAM lParam
-) {
-    if (!chat || hWnd != chat)
-        return false;
-
-    POINT point = {
-        GET_X_LPARAM(lParam),
-        GET_Y_LPARAM(lParam)
-    };
-
-    if (
-        msg == WM_MOUSEMOVE &&
-        media_inline_audio_drag_mode != 0 &&
-        media_inline_audio_drag_document >= 0
-    ) {
-        RECT player = {0};
-
-        if (!media_inline_audio_get_player_rect(
-            media_inline_audio_drag_document,
-            &player
-        )) {
-            return false;
-        }
-
-        int relative_x =
-            point.x - player.left;
-
-        if (media_inline_audio_drag_mode == 1) {
-            media_inline_audio_set_seek_from_x(
-                media_inline_audio_drag_document,
-                relative_x
-            );
-        } else if (
-            media_inline_audio_drag_mode == 2
-        ) {
-            media_inline_audio_set_volume_from_x(
-                media_inline_audio_drag_document,
-                relative_x
-            );
-        }
-
-        return true;
-    }
-
-    if (
-        msg == WM_LBUTTONUP &&
-        media_inline_audio_drag_mode != 0
-    ) {
-        if (media_inline_audio_drag_mode == 1)
-            media_inline_audio_commit_seek();
-
-        media_inline_audio_drag_mode = 0;
-        media_inline_audio_drag_document = -1;
-
-        if (GetCapture() == chat)
-            ReleaseCapture();
-
-        return true;
-    }
-
-    if (
-        msg != WM_LBUTTONDOWN &&
-        msg != WM_LBUTTONDBLCLK
-    ) {
-        return false;
-    }
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        RECT player = {0};
-
-        if (!media_inline_audio_get_player_rect(i, &player))
-            continue;
-
-        if (!PtInRect(&player, point))
-            continue;
-
-        if (msg == WM_LBUTTONDBLCLK)
-            return true;
-
-        int x = point.x - player.left;
-        int y = point.y - player.top;
-
-        if (
-            x >= 7 &&
-            x <= 41 &&
-            y >= 8 &&
-            y <= 46
-        ) {
-            media_inline_audio_begin_or_toggle(i);
-            return true;
-        }
-
-        if (
-            x >= 49 &&
-            x <= 232 &&
-            y >= 5 &&
-            y <= 29
-        ) {
-            if (
-                !media_inline_audio ||
-                !media_inline_audio_path[0] ||
-                _wcsicmp(
-                    documents[i].filename,
-                    media_inline_audio_path
-                ) != 0
-            ) {
-                media_inline_audio_begin_or_toggle(i);
-            }
-
-            media_inline_audio_drag_mode = 1;
-            media_inline_audio_drag_document = i;
-            media_inline_audio_seek_dirty = false;
-            SetCapture(chat);
-
-            media_inline_audio_set_seek_from_x(i, x);
-            return true;
-        }
-
-        if (
-            x >= 262 &&
-            x <= 322 &&
-            y >= 5 &&
-            y <= 29
-        ) {
-            media_inline_audio_drag_mode = 2;
-            media_inline_audio_drag_document = i;
-            SetCapture(chat);
-
-            media_inline_audio_set_volume_from_x(i, x);
-            return true;
-        }
-
-        if (
-            x >= 260 &&
-            x <= 323 &&
-            y >= 30 &&
-            y <= 50
-        ) {
-            if (
-                !media_inline_audio ||
-                !media_inline_audio_path[0] ||
-                _wcsicmp(
-                    documents[i].filename,
-                    media_inline_audio_path
-                ) != 0
-            ) {
-                media_inline_audio_begin_or_toggle(i);
-            }
-
-            media_inline_audio_cycle_rate();
-            media_inline_audio_apply_visual(true);
-            return true;
-        }
-
-        return true;
-    }
-
-    return false;
-}'''
-    s = s[:mouse_start] + mouse_v5 + s[mouse_end:]
-
-    # IMPORTANT: target the real definition, not the earlier forward
-    # declaration `static void media_inline_audio_apply_visual(bool force);`.
-    # Using the shorter prefix makes function_range() start at the declaration
-    # and consume media_inline_audio_release(), which breaks declaration order.
-    visual_signature = (
-        "static void media_inline_audio_apply_visual(\n"
-        "    bool force\n"
-        ") {"
-    )
-
-    visual_start, visual_end = function_range(
-        s,
-        visual_signature
-    )
-    visual_v5 = r'''static void media_inline_audio_apply_visual(
-    bool force
-) {
-    if (
-        !chat ||
-        !media_inline_audio ||
-        !media_inline_audio_path[0]
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    media_inline_audio_get_times_v5(
-        &position,
-        &duration
-    );
-
-    if (
-        media_inline_audio_drag_mode == 1 &&
-        media_inline_audio_seek_dirty
-    ) {
-        position = media_inline_audio_drag_preview;
-    }
-
-    int visual_tick =
-        (int)(
-            position /
-            5000000LL
-        );
-
-    if (
-        !force &&
-        visual_tick ==
-            media_inline_audio_last_second
-    ) {
-        return;
-    }
-
-    media_inline_audio_last_second =
-        visual_tick;
-
-    bool playing =
-        state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        if (
-            !documents[i].filename ||
-            _wcsicmp(
-                documents[i].filename,
-                media_inline_audio_path
-            ) != 0
-        ) {
-            continue;
-        }
-
-        media_inline_audio_replace_bitmap(
-            i,
-            position,
-            duration,
-            playing
-        );
-        break;
-    }
-}'''
-    s = s[:visual_start] + visual_v5 + s[visual_end:]
-
-write(t, s)
-
-# -----------------------------------------------------------------------------
-# Final v5 verification
-# -----------------------------------------------------------------------------
-checks_v5 = {
-    t: [
-        "media_tabs_av_runtime_v5",
-        "media_propvariant_to_hns",
-        "media player seek commit target=",
-        "media_player_cycle_rate",
-        "hMediaPlayerSpeed",
-        "inline audio seek commit target=",
-        "media_inline_audio_cycle_rate",
-        "media_inline_audio_cached_duration",
-        "VT_UI8",
-    ],
-}
-
-for file_path, tokens in checks_v5.items():
-    text = read(file_path)
-    for token in tokens:
-        if token not in text:
-            raise SystemExit(
-                f"Media v5 verification failed in {file_path.name}: {token}"
-            )
-
-# Compile-order/regression checks for the inline-audio visual replacement.
-text = read(t)
-visual_definition = (
-    "static void media_inline_audio_apply_visual(\n"
-    "    bool force\n"
-    ") {"
-)
-if text.count(visual_definition) != 1:
-    raise SystemExit(
-        "Media v5 verification failed: expected exactly one "
-        "media_inline_audio_apply_visual body."
-    )
-for required in (
-    "static void media_inline_audio_apply_visual(bool force);",
-    "static void media_inline_audio_start_timer();",
-    "static void media_inline_audio_release() {",
-):
-    if required not in text:
-        raise SystemExit(
-            f"Media v5 verification failed: lost required declaration/helper: {required}"
-        )
-
-print(
-    "Applied Media A/V v5: reliable video/audio seeking, robust MFPlay "
-    "duration decoding, and 0.5x-2.0x playback speed controls."
-)
-
-
-# =============================================================================
-# Media A/V v5.2 - visual polish only + mod credit
-# - pin the video seek thumb/time during asynchronous MFPlay seek commit
-# - avoid double visual commit on TB_THUMBPOSITION + TB_ENDTRACK
-# - pin inline-audio seek rendering until MFPlay catches up
-# - immediately reflect requested Play/Pause state in the inline player bitmap
-# - brand the main window as a LatvianGhost modification
-# =============================================================================
-
-s = read(t)
-
-if "media_tabs_av_runtime_v52" not in s:
-    global_anchor = "static bool media_inline_audio_seek_dirty = false;"
-    if global_anchor not in s:
-        raise SystemExit("Could not locate v5 inline-audio visual globals for v5.2.")
-
-    s = s.replace(
-        global_anchor,
-        global_anchor
-        + r'''
-
-// media_tabs_av_runtime_v52
-// These values affect presentation only; playback/seek behavior stays v5.
-static int media_player_visual_seek_slider = -1;
-static DWORD media_inline_audio_visual_seek_hold_until = 0;
-static LONGLONG media_inline_audio_visual_seek_position = 0;
-static DWORD media_inline_audio_visual_play_hold_until = 0;
-static bool media_inline_audio_visual_playing = false;
-''',
-        1,
-    )
-
-    # -------------------------------------------------------------------------
-    # Video player: during MFPlay's asynchronous seek, render the committed
-    # slider/time rather than the stale position that GetPosition can return
-    # for a few timer ticks. This is presentation-only anti-snapback logic.
-    # -------------------------------------------------------------------------
-    update_v52 = r'''static void media_player_update_controls() {
-    if (!hMediaPlayerSeek)
-        return;
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    if (!media_player_get_time(&position, &duration))
-        return;
-
-    bool seek_hold =
-        media_player_seek_hold_until != 0 &&
-        (LONG)(GetTickCount() - media_player_seek_hold_until) < 0;
-
-    LONGLONG visual_position = position;
-
-    if (
-        seek_hold &&
-        media_player_visual_seek_slider >= 0 &&
-        duration > 0
-    ) {
-        visual_position =
-            duration *
-            media_player_visual_seek_slider /
-            1000LL;
-
-        if (!media_player_user_seeking) {
-            SendMessageW(
-                hMediaPlayerSeek,
-                TBM_SETPOS,
-                TRUE,
-                media_player_visual_seek_slider
-            );
-        }
-    } else {
-        if (!seek_hold)
-            media_player_visual_seek_slider = -1;
-
-        if (!media_player_user_seeking) {
-            int slider =
-                (int)(
-                    position * 1000LL /
-                    duration
-                );
-
-            SendMessageW(
-                hMediaPlayerSeek,
-                TBM_SETPOS,
-                TRUE,
-                slider
-            );
-        }
-    }
-
-    if (hMediaPlayerTime) {
-        wchar_t now_text[32] = {0};
-        wchar_t total_text[32] = {0};
-        wchar_t combined[80] = {0};
-
-        media_player_format_time(
-            visual_position,
-            now_text,
-            ARRAYSIZE(now_text)
-        );
-
-        media_player_format_time(
-            duration,
-            total_text,
-            ARRAYSIZE(total_text)
-        );
-
-        _snwprintf(
-            combined,
-            ARRAYSIZE(combined) - 1,
-            L"%s / %s",
-            now_text,
-            total_text
-        );
-        combined[ARRAYSIZE(combined) - 1] = 0;
-
-        SetWindowTextW(
-            hMediaPlayerTime,
-            combined
-        );
-    }
-}'''
-    s = replace_function(
-        s,
-        "static void media_player_update_controls()",
-        update_v52,
-    )
-
-    proc_start, proc_end = function_range(
-        s,
-        "static LRESULT CALLBACK TelegacyMediaPlayerWindow("
-    )
-    proc = s[proc_start:proc_end]
-
-    seek_start = proc.find("            if (source == hMediaPlayerSeek) {")
-    seek_end = proc.find(
-        "\n            if (source == hMediaPlayerVolume) {",
-        seek_start,
-    )
-
-    if seek_start < 0 or seek_end < 0:
-        raise SystemExit("Could not isolate video seek branch for v5.2.")
-
-    seek_branch_v52 = r'''            if (source == hMediaPlayerSeek) {
-                int code = LOWORD(wParam);
-                int slider =
-                    (int)SendMessageW(
-                        hMediaPlayerSeek,
-                        TBM_GETPOS,
-                        0,
-                        0
-                    );
-
-                LONGLONG position = 0;
-                LONGLONG duration = 0;
-                media_player_get_time(
-                    &position,
-                    &duration
-                );
-
-                if (duration <= 0)
-                    duration = media_player_cached_duration;
-
-                if (code == TB_THUMBTRACK) {
-                    media_player_user_seeking = true;
-                    media_player_pending_seek_slider = slider;
-
-                    if (
-                        duration > 0 &&
-                        hMediaPlayerTime
-                    ) {
-                        LONGLONG preview =
-                            duration *
-                            slider /
-                            1000LL;
-
-                        wchar_t now_text[32] = {0};
-                        wchar_t total_text[32] = {0};
-                        wchar_t combined[80] = {0};
-
-                        media_player_format_time(
-                            preview,
-                            now_text,
-                            ARRAYSIZE(now_text)
-                        );
-
-                        media_player_format_time(
-                            duration,
-                            total_text,
-                            ARRAYSIZE(total_text)
-                        );
-
-                        _snwprintf(
-                            combined,
-                            ARRAYSIZE(combined) - 1,
-                            L"%s / %s",
-                            now_text,
-                            total_text
-                        );
-                        combined[ARRAYSIZE(combined) - 1] = 0;
-
-                        SetWindowTextW(
-                            hMediaPlayerTime,
-                            combined
-                        );
-                    }
-
-                    return 0;
-                }
-
-                // The trackbar normally sends TB_THUMBPOSITION and then
-                // TB_ENDTRACK for one mouse release. Keep the first value but
-                // commit only once on ENDTRACK, otherwise the thumb can flash.
-                if (code == TB_THUMBPOSITION) {
-                    media_player_user_seeking = true;
-                    media_player_pending_seek_slider = slider;
-                    return 0;
-                }
-
-                if (
-                    code == TB_ENDTRACK ||
-                    code == TB_LINEUP ||
-                    code == TB_LINEDOWN ||
-                    code == TB_PAGEUP ||
-                    code == TB_PAGEDOWN
-                ) {
-                    media_player_user_seeking = true;
-
-                    int committed_slider =
-                        media_player_pending_seek_slider >= 0
-                            ? media_player_pending_seek_slider
-                            : slider;
-
-                    if (duration > 0) {
-                        media_player_visual_seek_slider =
-                            committed_slider;
-
-                        SendMessageW(
-                            hMediaPlayerSeek,
-                            TBM_SETPOS,
-                            TRUE,
-                            committed_slider
-                        );
-
-                        media_player_set_position_v2(
-                            duration *
-                            committed_slider /
-                            1000LL
-                        );
-                    }
-
-                    media_player_pending_seek_slider = -1;
-                    media_player_user_seeking = false;
-                    return 0;
-                }
-
-                return 0;
-            }'''
-
-    proc = proc[:seek_start] + seek_branch_v52 + proc[seek_end:]
-    s = s[:proc_start] + proc + s[proc_end:]
-
-    # Reset the extra visual state together with the existing player state.
-    release_start, release_end = function_range(
-        s,
-        "static void media_player_release_graph()"
-    )
-    release_func = s[release_start:release_end]
-    release_anchor = "    media_player_seek_hold_until = 0;"
-    if release_anchor not in release_func:
-        raise SystemExit("Could not locate video seek visual reset anchor for v5.2.")
-    release_func = release_func.replace(
-        release_anchor,
-        release_anchor + "\n    media_player_visual_seek_slider = -1;",
-        1,
-    )
-    s = s[:release_start] + release_func + s[release_end:]
-
-    # -------------------------------------------------------------------------
-    # Inline audio: remember the target position briefly after mouse-up. MFPlay
-    # seeking is asynchronous, and the old code immediately redrew from the old
-    # GetPosition result, causing the bitmap thumb to jump backwards/forwards.
-    # -------------------------------------------------------------------------
-    commit_audio_v52 = r'''static void media_inline_audio_commit_seek() {
-    if (
-        !media_inline_audio ||
-        !media_inline_audio_seek_dirty
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    bool resume =
-        state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    if (resume)
-        media_inline_audio->Pause();
-
-    PROPVARIANT value = {0};
-    value.vt = VT_I8;
-    value.hVal.QuadPart =
-        media_inline_audio_drag_preview;
-
-    HRESULT hr =
-        media_inline_audio->SetPosition(
-            MFP_POSITIONTYPE_100NS,
-            &value
-        );
-
-    diag_log(
-        "inline audio seek commit target=%I64d hr=0x%08X resume=%d",
-        media_inline_audio_drag_preview,
-        (unsigned int)hr,
-        resume ? 1 : 0
-    );
-
-    if (resume && SUCCEEDED(hr))
-        media_inline_audio->Play();
-
-    if (SUCCEEDED(hr)) {
-        media_inline_audio_visual_seek_position =
-            media_inline_audio_drag_preview;
-        media_inline_audio_visual_seek_hold_until =
-            GetTickCount() + 750;
-
-        // Pause/Play around SetPosition can also expose a stale state for one
-        // timer tick. Preserve the state the user actually had before seeking.
-        media_inline_audio_visual_playing = resume;
-        media_inline_audio_visual_play_hold_until =
-            GetTickCount() + 450;
-    }
-
-    media_inline_audio_seek_dirty = false;
-    media_inline_audio_last_second = -1;
-    media_inline_audio_apply_visual(true);
-}'''
-    s = replace_function(
-        s,
-        "static void media_inline_audio_commit_seek()",
-        commit_audio_v52,
-    )
-
-    # Same-track Play/Pause is asynchronous too. Record the state requested by
-    # the click so the glyph changes immediately and cannot briefly show the
-    # inverse icon while GetState is catching up.
-    toggle_start, toggle_end = function_range(
-        s,
-        "bool media_inline_audio_toggle("
-    )
-    toggle_func = s[toggle_start:toggle_end]
-
-    old_toggle = r'''            if (state == MFP_MEDIAPLAYER_STATE_PLAYING) {
-                hr = media_inline_audio->Pause();
-            } else {
-                hr = media_inline_audio->Play();
-            }'''
-    new_toggle = r'''            bool requested_playing =
-                state != MFP_MEDIAPLAYER_STATE_PLAYING;
-
-            if (requested_playing) {
-                hr = media_inline_audio->Play();
-            } else {
-                hr = media_inline_audio->Pause();
-            }
-
-            if (SUCCEEDED(hr)) {
-                media_inline_audio_visual_playing =
-                    requested_playing;
-                media_inline_audio_visual_play_hold_until =
-                    GetTickCount() + 550;
-                media_inline_audio_last_second = -1;
-                media_inline_audio_apply_visual(true);
-            }'''
-
-    if old_toggle not in toggle_func:
-        raise SystemExit("Could not locate same-track Play/Pause block for v5.2.")
-    toggle_func = toggle_func.replace(old_toggle, new_toggle, 1)
-
-    open_tail = r'''    media_inline_audio_last_second = -1;
-    media_inline_audio_start_timer();
-
-    return true;'''
-    open_tail_new = r'''    media_inline_audio_visual_playing = true;
-    media_inline_audio_visual_play_hold_until =
-        GetTickCount() + 650;
-    media_inline_audio_last_second = -1;
-    media_inline_audio_start_timer();
-    media_inline_audio_apply_visual(true);
-
-    return true;'''
-
-    if open_tail not in toggle_func:
-        raise SystemExit("Could not locate inline-audio open tail for v5.2.")
-    toggle_func = toggle_func.replace(open_tail, open_tail_new, 1)
-
-    s = s[:toggle_start] + toggle_func + s[toggle_end:]
-
-    # Speed changes pause/resume internally. Pin the old play state while the
-    # visual refresh following SetRate runs, avoiding an incorrect Play glyph.
-    rate_start, rate_end = function_range(
-        s,
-        "static bool media_inline_audio_apply_rate_index("
-    )
-    rate_func = s[rate_start:rate_end]
-    rate_anchor = r'''    if (resume && SUCCEEDED(hr))
-        media_inline_audio->Play();'''
-    rate_new = rate_anchor + r'''
-
-    if (SUCCEEDED(hr)) {
-        media_inline_audio_visual_playing = resume;
-        media_inline_audio_visual_play_hold_until =
-            GetTickCount() + 400;
-    }'''
-    if rate_anchor not in rate_func:
-        raise SystemExit("Could not locate inline-audio rate resume block for v5.2.")
-    rate_func = rate_func.replace(rate_anchor, rate_new, 1)
-    s = s[:rate_start] + rate_func + s[rate_end:]
-
-    # Final visual function: prefer drag preview, then committed seek hold, and
-    # prefer the explicitly requested button state for a short transition.
-    visual_v52 = r'''static void media_inline_audio_apply_visual(
-    bool force
-) {
-    if (
-        !chat ||
-        !media_inline_audio ||
-        !media_inline_audio_path[0]
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    media_inline_audio_get_times_v5(
-        &position,
-        &duration
-    );
-
-    bool seek_visual_hold =
-        media_inline_audio_visual_seek_hold_until != 0 &&
-        (LONG)(
-            GetTickCount() -
-            media_inline_audio_visual_seek_hold_until
-        ) < 0;
-
-    if (
-        media_inline_audio_drag_mode == 1 &&
-        media_inline_audio_seek_dirty
-    ) {
-        position = media_inline_audio_drag_preview;
-    } else if (seek_visual_hold) {
-        position = media_inline_audio_visual_seek_position;
-    } else {
-        media_inline_audio_visual_seek_hold_until = 0;
-    }
-
-    int visual_tick =
-        (int)(
-            position /
-            5000000LL
-        );
-
-    if (
-        !force &&
-        visual_tick ==
-            media_inline_audio_last_second
-    ) {
-        return;
-    }
-
-    media_inline_audio_last_second =
-        visual_tick;
-
-    bool playing =
-        state == MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    bool play_visual_hold =
-        media_inline_audio_visual_play_hold_until != 0 &&
-        (LONG)(
-            GetTickCount() -
-            media_inline_audio_visual_play_hold_until
-        ) < 0;
-
-    if (play_visual_hold) {
-        playing = media_inline_audio_visual_playing;
-    } else {
-        media_inline_audio_visual_play_hold_until = 0;
-    }
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        if (
-            !documents[i].filename ||
-            _wcsicmp(
-                documents[i].filename,
-                media_inline_audio_path
-            ) != 0
-        ) {
-            continue;
-        }
-
-        media_inline_audio_replace_bitmap(
-            i,
-            position,
-            duration,
-            playing
-        );
-        break;
-    }
-}'''
-
-    visual_signature = (
-        "static void media_inline_audio_apply_visual(\n"
-        "    bool force\n"
-        ") {"
-    )
-    s = replace_function(
-        s,
-        visual_signature,
-        visual_v52,
-    )
-
-    # Reset transition-only presentation state when audio is released.
-    audio_release_start, audio_release_end = function_range(
-        s,
-        "static void media_inline_audio_release()"
-    )
-    audio_release_func = s[audio_release_start:audio_release_end]
-    reset_anchor = "    media_inline_audio_seek_dirty = false;"
-    if reset_anchor not in audio_release_func:
-        raise SystemExit("Could not locate inline-audio visual reset anchor for v5.2.")
-    audio_release_func = audio_release_func.replace(
-        reset_anchor,
-        reset_anchor
-        + "\n    media_inline_audio_visual_seek_hold_until = 0;"
-        + "\n    media_inline_audio_visual_seek_position = 0;"
-        + "\n    media_inline_audio_visual_play_hold_until = 0;"
-        + "\n    media_inline_audio_visual_playing = false;",
-        1,
-    )
-    s = s[:audio_release_start] + audio_release_func + s[audio_release_end:]
-
-    # -------------------------------------------------------------------------
-    # Attribution: keep the original Telegacy name/copyright intact and add a
-    # clear, non-destructive modifier credit in the main window title.
-    # -------------------------------------------------------------------------
-    title_old = (
-        'hMain = CreateWindow(L"Telegacy", L"Telegacy", '
-        'WS_OVERLAPPEDWINDOW'
-    )
-    title_new = (
-        'hMain = CreateWindow(L"Telegacy", '
-        'L"Telegacy - LatvianGhost Mod", WS_OVERLAPPEDWINDOW'
-    )
-
-    if title_old in s:
-        s = s.replace(title_old, title_new, 1)
-    elif "LatvianGhost Mod" not in s:
-        raise SystemExit("Could not locate Telegacy main-window title for mod credit.")
-
-write(t, s)
-
-# -----------------------------------------------------------------------------
-# v5.2 verification
-# -----------------------------------------------------------------------------
-text = read(t)
-for token in (
-    "media_tabs_av_runtime_v52",
-    "media_player_visual_seek_slider",
-    "media_inline_audio_visual_seek_hold_until",
-    "media_inline_audio_visual_play_hold_until",
-    "code == TB_THUMBPOSITION",
-    "Telegacy - LatvianGhost Mod",
-):
-    if token not in text:
-        raise SystemExit(
-            f"Media v5.2 verification failed: {token}"
-        )
-
-visual_definition = (
-    "static void media_inline_audio_apply_visual(\n"
-    "    bool force\n"
-    ") {"
-)
-if text.count(visual_definition) != 1:
-    raise SystemExit(
-        "Media v5.2 verification failed: inline audio visual body count != 1"
-    )
-
-print(
-    "Applied Media A/V v5.2 visual polish: stable Play/Pause glyphs, "
-    "anti-jitter seek rendering, and LatvianGhost mod credit."
-)
-
-
-# =============================================================================
-# Media A/V v5.3 - deterministic Play/Pause glyph state
-# - the inline audio button is driven by the user's requested state, not by a
-#   potentially stale asynchronous MFPlay GetState() result
-# - a request stays visually latched until MFPlay confirms it on several
-#   consecutive refreshes
-# - seek/volume redraws use the same latched state, so dragging cannot flip the
-#   icon by accident
-# =============================================================================
-
-s = read(t)
-
-if "media_tabs_av_runtime_v53" not in s:
-    global_anchor = "static bool media_inline_audio_visual_playing = false;"
-    if global_anchor not in s:
-        raise SystemExit(
-            "Could not locate v5.2 inline-audio play visual globals for v5.3."
-        )
-
-    s = s.replace(
-        global_anchor,
-        global_anchor
-        + r'''
-
-// media_tabs_av_runtime_v53
-// -1 = no explicit request pending, 0 = user requested Pause, 1 = Play.
-// Do not clear this merely because a timer expired: MFPlay state transitions
-// are asynchronous, so the glyph should follow the user's command until the
-// backend has actually acknowledged it.
-static int media_inline_audio_requested_play_state = -1;
-static int media_inline_audio_requested_play_confirmations = 0;
-''',
-        1,
-    )
-
-    toggle_pos = s.find("bool media_inline_audio_toggle(")
-    if toggle_pos < 0:
-        raise SystemExit("Could not locate inline audio toggle for v5.3.")
-
-    state_helpers = r'''
-static bool media_inline_audio_visual_is_playing(
-    MFP_MEDIAPLAYER_STATE actual_state
-) {
-    if (media_inline_audio_requested_play_state >= 0) {
-        return
-            media_inline_audio_requested_play_state != 0;
-    }
-
-    return
-        actual_state ==
-        MFP_MEDIAPLAYER_STATE_PLAYING;
-}
-
-static void media_inline_audio_visual_request_playing(
-    bool playing
-) {
-    media_inline_audio_requested_play_state =
-        playing ? 1 : 0;
-
-    media_inline_audio_requested_play_confirmations = 0;
-
-    // Keep the old v5.2 fields synchronized for compatibility with code that
-    // may still inspect them, but v5.3 no longer relies on a short time limit.
-    media_inline_audio_visual_playing = playing;
-    media_inline_audio_visual_play_hold_until = 0;
-}
-
-static void media_inline_audio_visual_observe_backend(
-    MFP_MEDIAPLAYER_STATE actual_state
-) {
-    if (media_inline_audio_requested_play_state < 0)
-        return;
-
-    bool actual_playing =
-        actual_state ==
-        MFP_MEDIAPLAYER_STATE_PLAYING;
-
-    bool requested_playing =
-        media_inline_audio_requested_play_state != 0;
-
-    if (actual_playing == requested_playing) {
-        media_inline_audio_requested_play_confirmations++;
-
-        // Require more than one observation. This prevents one transient
-        // GetState() sample from releasing the visual latch too early.
-        if (
-            media_inline_audio_requested_play_confirmations >= 3
-        ) {
-            media_inline_audio_requested_play_state = -1;
-            media_inline_audio_requested_play_confirmations = 0;
-        }
-    } else {
-        media_inline_audio_requested_play_confirmations = 0;
-    }
-}
-
-'''
-
-    s = s[:toggle_pos] + state_helpers + s[toggle_pos:]
-
-    # ---------------------------------------------------------------------
-    # Replace the same-track toggle logic. The next command is derived from
-    # what the button currently represents, not from a possibly stale backend
-    # state. Thus Play can never redraw as Pause (or vice versa) just because
-    # GetState() has not caught up yet.
-    # ---------------------------------------------------------------------
-    toggle_start, toggle_end = function_range(
-        s,
-        "bool media_inline_audio_toggle("
-    )
-    toggle_func = s[toggle_start:toggle_end]
-
-    old_toggle = r'''            bool requested_playing =
-                state != MFP_MEDIAPLAYER_STATE_PLAYING;
-
-            if (requested_playing) {
-                hr = media_inline_audio->Play();
-            } else {
-                hr = media_inline_audio->Pause();
-            }
-
-            if (SUCCEEDED(hr)) {
-                media_inline_audio_visual_playing =
-                    requested_playing;
-                media_inline_audio_visual_play_hold_until =
-                    GetTickCount() + 550;
-                media_inline_audio_last_second = -1;
-                media_inline_audio_apply_visual(true);
-            }'''
-
-    new_toggle = r'''            bool currently_shown_as_playing =
-                media_inline_audio_visual_is_playing(
-                    state
-                );
-
-            bool requested_playing =
-                !currently_shown_as_playing;
-
-            if (requested_playing) {
-                hr = media_inline_audio->Play();
-            } else {
-                hr = media_inline_audio->Pause();
-            }
-
-            if (SUCCEEDED(hr)) {
-                media_inline_audio_visual_request_playing(
-                    requested_playing
-                );
-                media_inline_audio_last_second = -1;
-                media_inline_audio_apply_visual(true);
-            }'''
-
-    if old_toggle not in toggle_func:
-        raise SystemExit(
-            "Could not locate v5.2 same-track Play/Pause block for v5.3."
-        )
-
-    toggle_func = toggle_func.replace(
-        old_toggle,
-        new_toggle,
-        1,
-    )
-
-    old_open = r'''    media_inline_audio_visual_playing = true;
-    media_inline_audio_visual_play_hold_until =
-        GetTickCount() + 650;
-    media_inline_audio_last_second = -1;'''
-
-    new_open = r'''    media_inline_audio_visual_request_playing(true);
-    media_inline_audio_last_second = -1;'''
-
-    if old_open not in toggle_func:
-        raise SystemExit(
-            "Could not locate v5.2 initial Play visual block for v5.3."
-        )
-
-    toggle_func = toggle_func.replace(
-        old_open,
-        new_open,
-        1,
-    )
-
-    s = s[:toggle_start] + toggle_func + s[toggle_end:]
-
-    # ---------------------------------------------------------------------
-    # Seek preview must use the exact same visual state as the button. Without
-    # this, moving the seek thumb could redraw a stale inverse icon.
-    # ---------------------------------------------------------------------
-    seek_start, seek_end = function_range(
-        s,
-        "static void media_inline_audio_set_seek_from_x("
-    )
-    seek_func = s[seek_start:seek_end]
-
-    old_seek_draw = r'''    media_inline_audio_replace_bitmap(
-        document_index,
-        media_inline_audio_drag_preview,
-        duration,
-        state == MFP_MEDIAPLAYER_STATE_PLAYING
-    );'''
-
-    new_seek_draw = r'''    media_inline_audio_replace_bitmap(
-        document_index,
-        media_inline_audio_drag_preview,
-        duration,
-        media_inline_audio_visual_is_playing(
-            state
-        )
-    );'''
-
-    if old_seek_draw not in seek_func:
-        raise SystemExit(
-            "Could not locate inline seek preview bitmap redraw for v5.3."
-        )
-
-    seek_func = seek_func.replace(
-        old_seek_draw,
-        new_seek_draw,
-        1,
-    )
-    s = s[:seek_start] + seek_func + s[seek_end:]
-
-    # Volume dragging also redraws the bitmap. Make it respect the requested
-    # Play/Pause state instead of sampling raw MFPlay state directly.
-    volume_start, volume_end = function_range(
-        s,
-        "static void media_inline_audio_set_volume_from_x("
-    )
-    volume_func = s[volume_start:volume_end]
-
-    old_volume_state = r'''media_inline_audio->GetState(&state);
-        playing =
-            state == MFP_MEDIAPLAYER_STATE_PLAYING;'''
-
-    new_volume_state = r'''media_inline_audio->GetState(&state);
-        playing =
-            media_inline_audio_visual_is_playing(
-                state
-            );'''
-
-    if old_volume_state not in volume_func:
-        raise SystemExit(
-            "Could not locate inline volume visual-state block for v5.3."
-        )
-
-    volume_func = volume_func.replace(
-        old_volume_state,
-        new_volume_state,
-        1,
-    )
-    s = s[:volume_start] + volume_func + s[volume_end:]
-
-    # ---------------------------------------------------------------------
-    # Internal pause/resume operations used by seeking and SetRate must not
-    # make the button flash. Latch the pre-operation presentation unless an
-    # explicit user command is already pending.
-    # ---------------------------------------------------------------------
-    commit_start, commit_end = function_range(
-        s,
-        "static void media_inline_audio_commit_seek()"
-    )
-    commit_func = s[commit_start:commit_end]
-
-    old_commit_hold = r'''        // Pause/Play around SetPosition can also expose a stale state for one
-        // timer tick. Preserve the state the user actually had before seeking.
-        media_inline_audio_visual_playing = resume;
-        media_inline_audio_visual_play_hold_until =
-            GetTickCount() + 450;'''
-
-    new_commit_hold = r'''        // Pause/Play around SetPosition is an internal implementation detail.
-        // Preserve the visible state until MFPlay confirms the resumed state.
-        if (media_inline_audio_requested_play_state < 0) {
-            media_inline_audio_visual_request_playing(
-                resume
-            );
-        }'''
-
-    if old_commit_hold not in commit_func:
-        raise SystemExit(
-            "Could not locate v5.2 seek Play/Pause visual hold for v5.3."
-        )
-
-    commit_func = commit_func.replace(
-        old_commit_hold,
-        new_commit_hold,
-        1,
-    )
-    s = s[:commit_start] + commit_func + s[commit_end:]
-
-    rate_start, rate_end = function_range(
-        s,
-        "static bool media_inline_audio_apply_rate_index("
-    )
-    rate_func = s[rate_start:rate_end]
-
-    old_rate_hold = r'''    if (SUCCEEDED(hr)) {
-        media_inline_audio_visual_playing = resume;
-        media_inline_audio_visual_play_hold_until =
-            GetTickCount() + 400;
-    }'''
-
-    new_rate_hold = r'''    if (
-        SUCCEEDED(hr) &&
-        media_inline_audio_requested_play_state < 0
-    ) {
-        media_inline_audio_visual_request_playing(
-            resume
-        );
-    }'''
-
-    if old_rate_hold not in rate_func:
-        raise SystemExit(
-            "Could not locate v5.2 speed Play/Pause visual hold for v5.3."
-        )
-
-    rate_func = rate_func.replace(
-        old_rate_hold,
-        new_rate_hold,
-        1,
-    )
-    s = s[:rate_start] + rate_func + s[rate_end:]
-
-    # ---------------------------------------------------------------------
-    # Final redraw: a pending user request always wins. Only after three
-    # consecutive backend confirmations is raw GetState() allowed to control
-    # the glyph again.
-    # ---------------------------------------------------------------------
-    visual_v53 = r'''static void media_inline_audio_apply_visual(
-    bool force
-) {
-    if (
-        !chat ||
-        !media_inline_audio ||
-        !media_inline_audio_path[0]
-    ) {
-        return;
-    }
-
-    MFP_MEDIAPLAYER_STATE state =
-        MFP_MEDIAPLAYER_STATE_EMPTY;
-
-    media_inline_audio->GetState(&state);
-
-    LONGLONG position = 0;
-    LONGLONG duration = 0;
-
-    media_inline_audio_get_times_v5(
-        &position,
-        &duration
-    );
-
-    bool seek_visual_hold =
-        media_inline_audio_visual_seek_hold_until != 0 &&
-        (LONG)(
-            GetTickCount() -
-            media_inline_audio_visual_seek_hold_until
-        ) < 0;
-
-    if (
-        media_inline_audio_drag_mode == 1 &&
-        media_inline_audio_seek_dirty
-    ) {
-        position = media_inline_audio_drag_preview;
-    } else if (seek_visual_hold) {
-        position = media_inline_audio_visual_seek_position;
-    } else {
-        media_inline_audio_visual_seek_hold_until = 0;
-    }
-
-    int visual_tick =
-        (int)(
-            position /
-            5000000LL
-        );
-
-    bool playing =
-        media_inline_audio_visual_is_playing(
-            state
-        );
-
-    // Observe the backend after choosing the current visual state. Even when
-    // this call reaches the required confirmation count, this frame remains
-    // exactly what the user requested; the next frame may safely use backend
-    // state because it has then been confirmed stable.
-    media_inline_audio_visual_observe_backend(
-        state
-    );
-
-    if (
-        !force &&
-        visual_tick ==
-            media_inline_audio_last_second
-    ) {
-        return;
-    }
-
-    media_inline_audio_last_second =
-        visual_tick;
-
-    for (
-        int i = 0;
-        i < (int)documents.size();
-        i++
-    ) {
-        if (
-            !documents[i].filename ||
-            _wcsicmp(
-                documents[i].filename,
-                media_inline_audio_path
-            ) != 0
-        ) {
-            continue;
-        }
-
-        media_inline_audio_replace_bitmap(
-            i,
-            position,
-            duration,
-            playing
-        );
-        break;
-    }
-}'''
-
-    visual_signature = (
-        "static void media_inline_audio_apply_visual(\n"
-        "    bool force\n"
-        ") {"
-    )
-
-    s = replace_function(
-        s,
-        visual_signature,
-        visual_v53,
-    )
-
-    # Reset the deterministic latch together with the other inline-player
-    # state so opening another track cannot inherit the previous glyph.
-    release_start, release_end = function_range(
-        s,
-        "static void media_inline_audio_release()"
-    )
-    release_func = s[release_start:release_end]
-
-    reset_anchor = "    media_inline_audio_visual_playing = false;"
-    if reset_anchor not in release_func:
-        raise SystemExit(
-            "Could not locate v5.2 inline-audio visual reset for v5.3."
-        )
-
-    release_func = release_func.replace(
-        reset_anchor,
-        reset_anchor
-        + "\n    media_inline_audio_requested_play_state = -1;"
-        + "\n    media_inline_audio_requested_play_confirmations = 0;",
-        1,
-    )
-    s = s[:release_start] + release_func + s[release_end:]
-
-write(t, s)
-
-# Final v5.3 regression checks.
-text = read(t)
-checks_v53 = [
-    "media_tabs_av_runtime_v53",
-    "media_inline_audio_requested_play_state",
-    "media_inline_audio_visual_is_playing",
-    "media_inline_audio_visual_request_playing",
-    "media_inline_audio_visual_observe_backend",
-    "currently_shown_as_playing",
-]
-
-for token in checks_v53:
-    if token not in text:
-        raise SystemExit(
-            f"Media v5.3 verification failed: {token}"
-        )
-
-if text.count(
-    "static void media_inline_audio_apply_visual(\n"
-    "    bool force\n"
-    ") {"
-) != 1:
-    raise SystemExit(
-        "Media v5.3 regression: expected exactly one inline-audio visual body."
-    )
-
-print(
-    "Applied Media A/V v5.3: deterministic inline Play/Pause glyph state."
-)
-
-
-# =============================================================================
-# Media A/V v5.4 - final chat usability polish
-# - preserve chat viewport while older history is prepended
-# - Ctrl+V attaches clipboard files/images to the message composer
-# - smaller video previews in chat, with the same classic Play overlay as Media
-# =============================================================================
-
-# -----------------------------------------------------------------------------
-# telegacy.h: DragQueryFileW / HDROP for clipboard file pasting.
-# -----------------------------------------------------------------------------
+t = root / "src" / "telegacy.cpp"
+if not t.exists():
+    raise SystemExit(f"Missing expected Telegacy file: {t}")
+
+# ---------------------------------------------------------------------------
+# telegacy.h: v2 marker, fixed dialog page size, shared bitmap fitter
+# ---------------------------------------------------------------------------
 s = read(h)
-
-if "#include <shellapi.h>" not in s:
-    anchor = "#include <shlobj.h>"
-
-    if anchor not in s:
-        raise SystemExit(
-            "Could not locate shlobj.h include before adding shellapi.h."
-        )
-
-    s = s.replace(
-        anchor,
-        anchor + "\n#include <shellapi.h>",
-        1,
-    )
-
+marker = "// profile_navigation_latvianghost_v1"
+if marker not in s:
+    raise SystemExit("Profile navigation v1 marker missing in telegacy.h.")
+s = s.replace(
+    marker,
+    marker
+    + "\n// profile_navigation_latvianghost_v2"
+    + "\n#define LATVIANGHOST_DIALOGS_PAGE_SIZE 50"
+    + "\nHBITMAP profile_gallery_fit_bitmap(HBITMAP source);",
+    1,
+)
 write(h, s)
 
-
-# -----------------------------------------------------------------------------
-# response.cpp: process a getHistory page as one visual transaction and keep
-# the same message anchored at the same pixel position in the chat viewport.
-# This avoids the classic "scroll to bottom while loading older messages".
-# -----------------------------------------------------------------------------
-s = read(r)
-
-if "history_view_anchor_v54" not in s:
-    history_anchor = r'''\t\tint messages_count_old = messages.size();
-\t\tint documents_count_old = documents.size();
-\t\tfor (int i = 0; i < count; i++) offset_msg += message_handler(true, unenc_response + offset_msg, false, false, false);'''.replace('\\t', '\t')
-
-    history_replacement = r'''\t\tint messages_count_old = messages.size();
-\t\tint documents_count_old = documents.size();
-
-\t\t// history_view_anchor_v54
-\t\t// Older history is prepended.  Remember the first visible message and
-\t\t// its exact client-pixel position, suppress intermediate redraw/scroll
-\t\t// changes, then restore that anchor after the whole Telegram page is in.
-\t\tbool history_keep_view =
-\t\t\tmessages_count_old > 0 &&
-\t\t\tcount > 0;
-
-\t\tbool history_old_drawchat = drawchat;
-\t\tint history_anchor_message_id = 0;
-\t\tint history_anchor_char_offset = 0;
-\t\tPOINTL history_anchor_before = {0, 0};
-\t\tPOINT history_scroll_before = {0, 0};
-\t\tSCROLLINFO history_scrollbar_before = {0};
-
-\t\tif (history_keep_view) {
-\t\t\thistory_scrollbar_before.cbSize =
-\t\t\t\tsizeof(history_scrollbar_before);
-\t\t\thistory_scrollbar_before.fMask =
-\t\t\t\tSIF_RANGE |
-\t\t\t\tSIF_PAGE |
-\t\t\t\tSIF_POS;
-
-\t\t\tGetScrollInfo(
-\t\t\t\tchat,
-\t\t\t\tSB_VERT,
-\t\t\t\t&history_scrollbar_before
-\t\t\t);
-
-\t\t\tSendMessageW(
-\t\t\t\tchat,
-\t\t\t\tEM_GETSCROLLPOS,
-\t\t\t\t0,
-\t\t\t\t(LPARAM)&history_scroll_before
-\t\t\t);
-
-\t\t\tRECT history_rect = {0};
-\t\t\tSendMessageW(
-\t\t\t\tchat,
-\t\t\t\tEM_GETRECT,
-\t\t\t\t0,
-\t\t\t\t(LPARAM)&history_rect
-\t\t\t);
-
-\t\t\tPOINTL history_probe = {
-\t\t\t\thistory_rect.left + 2,
-\t\t\t\thistory_rect.top + 2
-\t\t\t};
-
-\t\t\tint history_top_char =
-\t\t\t\t(int)SendMessageW(
-\t\t\t\t\tchat,
-\t\t\t\t\tEM_CHARFROMPOS,
-\t\t\t\t\t0,
-\t\t\t\t\t(LPARAM)&history_probe
-\t\t\t\t);
-
-\t\t\tfor (
-\t\t\t\tint i = 0;
-\t\t\t\ti < (int)messages.size();
-\t\t\t\ti++
-\t\t\t) {
-\t\t\t\tif (
-\t\t\t\t\thistory_top_char >= messages[i].start_char &&
-\t\t\t\t\thistory_top_char <= messages[i].end_footer
-\t\t\t\t) {
-\t\t\t\t\thistory_anchor_message_id = messages[i].id;
-\t\t\t\t\thistory_anchor_char_offset =
-\t\t\t\t\t\thistory_top_char -
-\t\t\t\t\t\tmessages[i].start_char;
-
-\t\t\t\t\tSendMessageW(
-\t\t\t\t\t\tchat,
-\t\t\t\t\t\tEM_POSFROMCHAR,
-\t\t\t\t\t\t(WPARAM)&history_anchor_before,
-\t\t\t\t\t\t(LPARAM)history_top_char
-\t\t\t\t\t);
-
-\t\t\t\t\tbreak;
-\t\t\t\t}
-\t\t\t}
-
-\t\t\tSendMessageW(
-\t\t\t\tchat,
-\t\t\t\tWM_SETREDRAW,
-\t\t\t\tFALSE,
-\t\t\t\t0
-\t\t\t);
-
-\t\t\tdrawchat = false;
-\t\t}
-
-\t\tfor (int i = 0; i < count; i++)
-\t\t\toffset_msg +=
-\t\t\t\tmessage_handler(
-\t\t\t\t\ttrue,
-\t\t\t\t\tunenc_response + offset_msg,
-\t\t\t\t\tfalse,
-\t\t\t\t\tfalse,
-\t\t\t\t\tfalse
-\t\t\t\t);'''.replace('\\t', '\t')
-
-    if history_anchor not in s:
-        raise SystemExit(
-            "Could not locate getHistory message batch for viewport preservation."
-        )
-
-    s = s.replace(
-        history_anchor,
-        history_replacement,
-        1,
-    )
-
-    restore_anchor = "\t\tget_unknown_custom_emojis();"
-
-    restore_code = r'''\t\tif (history_keep_view) {
-\t\t\tdrawchat = history_old_drawchat;
-
-\t\t\tbool history_restored = false;
-
-\t\t\tif (history_anchor_message_id != 0) {
-\t\t\t\tfor (
-\t\t\t\t\tint i = 0;
-\t\t\t\t\ti < (int)messages.size();
-\t\t\t\t\ti++
-\t\t\t\t) {
-\t\t\t\t\tif (
-\t\t\t\t\t\tmessages[i].id ==
-\t\t\t\t\t\thistory_anchor_message_id
-\t\t\t\t\t) {
-\t\t\t\t\t\tint history_new_char =
-\t\t\t\t\t\t\tmessages[i].start_char +
-\t\t\t\t\t\t\thistory_anchor_char_offset;
-
-\t\t\t\t\t\tif (
-\t\t\t\t\t\t\thistory_new_char >
-\t\t\t\t\t\t\tmessages[i].end_footer
-\t\t\t\t\t\t) {
-\t\t\t\t\t\t\thistory_new_char =
-\t\t\t\t\t\t\t\tmessages[i].end_footer;
-\t\t\t\t\t\t}
-
-\t\t\t\t\t\tPOINTL history_anchor_after = {0, 0};
-\t\t\t\t\t\tPOINT history_scroll_after = {0, 0};
-
-\t\t\t\t\t\tSendMessageW(
-\t\t\t\t\t\t\tchat,
-\t\t\t\t\t\t\tEM_POSFROMCHAR,
-\t\t\t\t\t\t\t(WPARAM)&history_anchor_after,
-\t\t\t\t\t\t\t(LPARAM)history_new_char
-\t\t\t\t\t\t);
-
-\t\t\t\t\t\tSendMessageW(
-\t\t\t\t\t\t\tchat,
-\t\t\t\t\t\t\tEM_GETSCROLLPOS,
-\t\t\t\t\t\t\t0,
-\t\t\t\t\t\t\t(LPARAM)&history_scroll_after
-\t\t\t\t\t\t);
-
-\t\t\t\t\t\tPOINT history_target =
-\t\t\t\t\t\t\thistory_scroll_after;
-
-\t\t\t\t\t\thistory_target.y +=
-\t\t\t\t\t\t\thistory_anchor_after.y -
-\t\t\t\t\t\t\thistory_anchor_before.y;
-
-\t\t\t\t\t\tif (history_target.y < 0)
-\t\t\t\t\t\t\thistory_target.y = 0;
-
-\t\t\t\t\t\tSendMessageW(
-\t\t\t\t\t\t\tchat,
-\t\t\t\t\t\t\tEM_SETSCROLLPOS,
-\t\t\t\t\t\t\t0,
-\t\t\t\t\t\t\t(LPARAM)&history_target
-\t\t\t\t\t\t);
-
-\t\t\t\t\t\thistory_restored = true;
-\t\t\t\t\t\tbreak;
-\t\t\t\t\t}
-\t\t\t\t}
-\t\t\t}
-
-\t\t\t// Fallback for unusual service-only pages where the old top message
-\t\t\t// cannot be identified: preserve scroll by total range growth.
-\t\t\tif (!history_restored) {
-\t\t\t\tSCROLLINFO history_scrollbar_after = {0};
-\t\t\t\thistory_scrollbar_after.cbSize =
-\t\t\t\t\tsizeof(history_scrollbar_after);
-\t\t\t\thistory_scrollbar_after.fMask =
-\t\t\t\t\tSIF_RANGE |
-\t\t\t\t\tSIF_PAGE |
-\t\t\t\t\tSIF_POS;
-
-\t\t\t\tGetScrollInfo(
-\t\t\t\t\tchat,
-\t\t\t\t\tSB_VERT,
-\t\t\t\t\t&history_scrollbar_after
-\t\t\t\t);
-
-\t\t\t\tint history_target_pos =
-\t\t\t\t\thistory_scrollbar_before.nPos +
-\t\t\t\t\t(
-\t\t\t\t\t\thistory_scrollbar_after.nMax -
-\t\t\t\t\t\thistory_scrollbar_before.nMax
-\t\t\t\t\t);
-
-\t\t\t\tint history_max_pos =
-\t\t\t\t\thistory_scrollbar_after.nMax -
-\t\t\t\t\t(int)history_scrollbar_after.nPage +
-\t\t\t\t\t1;
-
-\t\t\t\tif (history_max_pos < 0)
-\t\t\t\t\thistory_max_pos = 0;
-
-\t\t\t\tif (history_target_pos < 0)
-\t\t\t\t\thistory_target_pos = 0;
-
-\t\t\t\tif (history_target_pos > history_max_pos)
-\t\t\t\t\thistory_target_pos = history_max_pos;
-
-\t\t\t\thistory_scrollbar_after.fMask = SIF_POS;
-\t\t\t\thistory_scrollbar_after.nPos = history_target_pos;
-
-\t\t\t\tSetScrollInfo(
-\t\t\t\t\tchat,
-\t\t\t\t\tSB_VERT,
-\t\t\t\t\t&history_scrollbar_after,
-\t\t\t\t\tTRUE
-\t\t\t\t);
-
-\t\t\t\tSendMessageW(
-\t\t\t\t\tchat,
-\t\t\t\t\tWM_VSCROLL,
-\t\t\t\t\tMAKEWPARAM(
-\t\t\t\t\t\tSB_THUMBPOSITION,
-\t\t\t\t\t\thistory_target_pos
-\t\t\t\t\t),
-\t\t\t\t\t0
-\t\t\t\t);
-\t\t\t}
-
-\t\t\tSendMessageW(
-\t\t\t\tchat,
-\t\t\t\tWM_SETREDRAW,
-\t\t\t\tTRUE,
-\t\t\t\t0
-\t\t\t);
-
-\t\t\tRedrawWindow(
-\t\t\t\tchat,
-\t\t\t\tNULL,
-\t\t\t\tNULL,
-\t\t\t\tRDW_INVALIDATE |
-\t\t\t\tRDW_UPDATENOW |
-\t\t\t\tRDW_ALLCHILDREN
-\t\t\t);
-\t\t}
-
-\t\tget_unknown_custom_emojis();'''.replace('\\t', '\t')
-
-    if restore_anchor not in s:
-        raise SystemExit(
-            "Could not locate getHistory completion point for viewport restore."
-        )
-
-    s = s.replace(
-        restore_anchor,
-        restore_code,
-        1,
-    )
-
-write(r, s)
-
-
-# -----------------------------------------------------------------------------
-# procs.cpp: Ctrl+V in the message input attaches files/images from Clipboard.
-# Text-only clipboard data still falls through to RichEdit's normal paste.
-# -----------------------------------------------------------------------------
-s = read(p)
-
-if "clipboard_attachment_v54" not in s:
-    msg_input_pos = s.find(
-        "LRESULT CALLBACK WndProcMsgInput("
-    )
-
-    if msg_input_pos < 0:
-        raise SystemExit(
-            "Could not locate WndProcMsgInput for clipboard attachment support."
-        )
-
-    clipboard_helpers = r'''
-// clipboard_attachment_v54
-static LONG telegacy_clipboard_serial = 0;
-
-static bool telegacy_clipboard_make_temp_path(
-    const wchar_t* extension,
-    wchar_t* out,
-    int out_count
-) {
-    if (!extension || !out || out_count < 32)
-        return false;
-
-    wchar_t temp[MAX_PATH] = {0};
-
-    DWORD len =
-        GetTempPathW(
-            ARRAYSIZE(temp),
-            temp
-        );
-
-    if (!len || len >= ARRAYSIZE(temp))
-        return false;
-
-    wchar_t dir[MAX_PATH] = {0};
-
-    _snwprintf(
-        dir,
-        ARRAYSIZE(dir) - 1,
-        L"%sTelegacyClipboard",
-        temp
-    );
-
-    dir[ARRAYSIZE(dir) - 1] = 0;
-    CreateDirectoryW(dir, NULL);
-
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-
-    LONG serial =
-        InterlockedIncrement(
-            &telegacy_clipboard_serial
-        );
-
-    _snwprintf(
-        out,
-        out_count - 1,
-        L"%s\\clipboard_%04d%02d%02d_%02d%02d%02d_%03d_%ld%s",
-        dir,
-        st.wYear,
-        st.wMonth,
-        st.wDay,
-        st.wHour,
-        st.wMinute,
-        st.wSecond,
-        st.wMilliseconds,
-        serial,
-        extension
-    );
-
-    out[out_count - 1] = 0;
-    return true;
-}
-
-static bool telegacy_clipboard_write_bytes(
-    const wchar_t* path,
-    const void* data,
-    DWORD size
-) {
-    if (!path || !data || !size)
-        return false;
-
-    HANDLE file =
-        CreateFileW(
-            path,
-            GENERIC_WRITE,
-            0,
-            NULL,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL
-        );
-
-    if (file == INVALID_HANDLE_VALUE)
-        return false;
-
-    DWORD written = 0;
-
-    bool ok =
-        WriteFile(
-            file,
-            data,
-            size,
-            &written,
-            NULL
-        ) &&
-        written == size;
-
-    CloseHandle(file);
-
-    if (!ok)
-        DeleteFileW(path);
-
-    return ok;
-}
-
-static bool telegacy_clipboard_write_dib(
-    HGLOBAL dib_handle,
-    const wchar_t* path
-) {
-    if (!dib_handle || !path)
-        return false;
-
-    SIZE_T dib_size =
-        GlobalSize(dib_handle);
-
-    if (
-        dib_size < sizeof(BITMAPINFOHEADER) ||
-        dib_size > 0x7fffffff
-    ) {
-        return false;
-    }
-
-    BYTE* dib =
-        (BYTE*)GlobalLock(
-            dib_handle
-        );
-
-    if (!dib)
-        return false;
-
-    BITMAPINFOHEADER* info =
-        (BITMAPINFOHEADER*)dib;
-
-    if (
-        info->biSize < sizeof(BITMAPINFOHEADER) ||
-        info->biSize > dib_size
-    ) {
-        GlobalUnlock(dib_handle);
-        return false;
-    }
-
-    DWORD masks = 0;
-
-    if (
-        info->biSize == sizeof(BITMAPINFOHEADER) &&
-        (
-            info->biCompression == BI_BITFIELDS ||
-            info->biCompression == 6
-        )
-    ) {
-        masks =
-            info->biCompression == 6
-                ? 16
-                : 12;
-    }
-
-    DWORD colors = info->biClrUsed;
-
-    if (
-        !colors &&
-        info->biBitCount > 0 &&
-        info->biBitCount <= 8
-    ) {
-        colors =
-            1u << info->biBitCount;
-    }
-
-    BITMAPFILEHEADER file_header = {0};
-    file_header.bfType = 0x4D42;
-    file_header.bfOffBits =
-        sizeof(BITMAPFILEHEADER) +
-        info->biSize +
-        masks +
-        colors * sizeof(RGBQUAD);
-    file_header.bfSize =
-        sizeof(BITMAPFILEHEADER) +
-        (DWORD)dib_size;
-
-    HANDLE file =
-        CreateFileW(
-            path,
-            GENERIC_WRITE,
-            0,
-            NULL,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL
-        );
-
-    if (file == INVALID_HANDLE_VALUE) {
-        GlobalUnlock(dib_handle);
-        return false;
-    }
-
-    DWORD written = 0;
-
-    bool ok =
-        WriteFile(
-            file,
-            &file_header,
-            sizeof(file_header),
-            &written,
-            NULL
-        ) &&
-        written == sizeof(file_header);
-
-    if (ok) {
-        written = 0;
-        ok =
-            WriteFile(
-                file,
-                dib,
-                (DWORD)dib_size,
-                &written,
-                NULL
-            ) &&
-            written == (DWORD)dib_size;
-    }
-
-    CloseHandle(file);
-    GlobalUnlock(dib_handle);
-
-    if (!ok)
-        DeleteFileW(path);
-
-    return ok;
-}
-
-static bool telegacy_clipboard_write_bitmap(
-    HBITMAP bitmap,
-    const wchar_t* path
-) {
-    if (!bitmap || !path)
-        return false;
-
-    BITMAP bm = {0};
-
-    if (!GetObject(
-        bitmap,
-        sizeof(bm),
-        &bm
-    )) {
-        return false;
-    }
-
-    if (
-        bm.bmWidth <= 0 ||
-        bm.bmHeight <= 0
-    ) {
-        return false;
-    }
-
-    BITMAPINFO info = {0};
-    info.bmiHeader.biSize =
-        sizeof(BITMAPINFOHEADER);
-    info.bmiHeader.biWidth =
-        bm.bmWidth;
-    info.bmiHeader.biHeight =
-        bm.bmHeight;
-    info.bmiHeader.biPlanes = 1;
-    info.bmiHeader.biBitCount = 32;
-    info.bmiHeader.biCompression = BI_RGB;
-
-    DWORD stride =
-        ((bm.bmWidth * 32 + 31) / 32) * 4;
-
-    DWORD image_size =
-        stride * bm.bmHeight;
-
-    std::vector<BYTE> bits(
-        image_size
-    );
-
-    HDC dc = GetDC(NULL);
-
-    if (!dc)
-        return false;
-
-    int rows =
-        GetDIBits(
-            dc,
-            bitmap,
-            0,
-            bm.bmHeight,
-            &bits[0],
-            &info,
-            DIB_RGB_COLORS
-        );
-
-    ReleaseDC(NULL, dc);
-
-    if (rows != bm.bmHeight)
-        return false;
-
-    BITMAPFILEHEADER file_header = {0};
-    file_header.bfType = 0x4D42;
-    file_header.bfOffBits =
-        sizeof(BITMAPFILEHEADER) +
-        sizeof(BITMAPINFOHEADER);
-    file_header.bfSize =
-        file_header.bfOffBits +
-        image_size;
-
-    HANDLE file =
-        CreateFileW(
-            path,
-            GENERIC_WRITE,
-            0,
-            NULL,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL
-        );
-
-    if (file == INVALID_HANDLE_VALUE)
-        return false;
-
-    DWORD written = 0;
-
-    bool ok =
-        WriteFile(
-            file,
-            &file_header,
-            sizeof(file_header),
-            &written,
-            NULL
-        ) &&
-        written == sizeof(file_header);
-
-    if (ok) {
-        written = 0;
-        ok =
-            WriteFile(
-                file,
-                &info.bmiHeader,
-                sizeof(info.bmiHeader),
-                &written,
-                NULL
-            ) &&
-            written == sizeof(info.bmiHeader);
-    }
-
-    if (ok) {
-        written = 0;
-        ok =
-            WriteFile(
-                file,
-                &bits[0],
-                image_size,
-                &written,
-                NULL
-            ) &&
-            written == image_size;
-    }
-
-    CloseHandle(file);
-
-    if (!ok)
-        DeleteFileW(path);
-
-    return ok;
-}
-
-static bool telegacy_clipboard_add_path(
-    const wchar_t* path,
-    bool* edit_prepared
-) {
-    if (!path || !path[0])
-        return false;
-
-    wchar_t* copy =
-        _wcsdup(path);
-
-    if (!copy)
-        return false;
-
-    if (
-        editing_msg_id &&
-        edit_prepared &&
-        !*edit_prepared
-    ) {
-        for (
-            int i = 0;
-            i < (int)files.size();
-            i++
-        ) {
-            free(files[i]);
-        }
-
-        files.clear();
-        *edit_prepared = true;
-    }
-
-    files.push_back(copy);
-    return true;
-}
-
-static bool telegacy_clipboard_attach(
-    HWND owner
-) {
-    if (!OpenClipboard(owner))
-        return false;
-
-    bool handled = false;
-    bool edit_prepared = false;
-
-    if (IsClipboardFormatAvailable(CF_HDROP)) {
-        HDROP drop =
-            (HDROP)GetClipboardData(
-                CF_HDROP
-            );
-
-        if (drop) {
-            UINT count =
-                DragQueryFileW(
-                    drop,
-                    0xFFFFFFFF,
-                    NULL,
-                    0
-                );
-
-            if (editing_msg_id && count > 1)
-                count = 1;
-
-            for (
-                UINT i = 0;
-                i < count;
-                i++
-            ) {
-                wchar_t path[MAX_PATH] = {0};
+# ---------------------------------------------------------------------------
+# helpers.cpp: safer gallery state, bounded request buffers, 160x160 fit,
+#              and larger messages.getDialogs pages.
+# ---------------------------------------------------------------------------
+s = read(helpers)
+
+s = s.replace(
+    "static Peer* profile_gallery_peer = NULL;\n"
+    "static HWND profile_gallery_picture = NULL;",
+    "static BYTE profile_gallery_peer_id[8] = {0};\n"
+    "static bool profile_gallery_peer_had_current_photo = false;\n"
+    "static HWND profile_gallery_picture = NULL;",
+    1,
+)
+
+s = s.replace(
+    "    profile_gallery_peer = NULL;\n"
+    "    profile_gallery_picture = NULL;",
+    "    memset(profile_gallery_peer_id, 0, sizeof(profile_gallery_peer_id));\n"
+    "    profile_gallery_peer_had_current_photo = false;\n"
+    "    profile_gallery_picture = NULL;",
+    1,
+)
+
+s = s.replace(
+    "    profile_gallery_peer = peer;\n"
+    "    profile_gallery_picture = picture;",
+    "    memcpy(profile_gallery_peer_id, peer->id, 8);\n"
+    "    profile_gallery_peer_had_current_photo = read_le(peer->photo, 8) != 0;\n"
+    "    profile_gallery_picture = picture;",
+    1,
+)
+
+s = s.replace(
+    "        profile_gallery_peer &&\n"
+    "        !read_le(profile_gallery_peer->photo, 8) &&\n"
+    "        !profile_gallery_photos.empty()",
+    "        !profile_gallery_peer_had_current_photo &&\n"
+    "        !profile_gallery_photos.empty()",
+    1,
+)
+
+s = s.replace(
+    "write_le(unenc_query + offset, 50, 4); // enough for a useful gallery",
+    "write_le(unenc_query + offset, 20, 4); // bounded profile gallery",
+    1,
+)
+
+# Prefer the available Telegram thumbnail closest to the actual 160x160 control
+# instead of falling back to the largest image.
+thumb_start = s.find("            int best_area = -1;")
+thumb_end_text = "            out->thumb_type = best_type ? best_type : 'm';"
+thumb_end = s.find(thumb_end_text, thumb_start)
+if thumb_start < 0 or thumb_end < 0:
+    raise SystemExit("Could not locate avatar thumbnail selection block.")
+thumb_end += len(thumb_end_text)
+
+thumb_replacement = r'''            int best_distance = 0x7fffffff;
+            char best_type = 0;
+
+            for (int i = 0; i < count && offset + 8 < total; i++) {
+                BYTE* size = photo + offset;
+                unsigned int size_constructor = (unsigned int)read_le(size, 4);
+                int size_len = photo_video_size_offset(size, true, false, false);
+                if (size_len <= 0 || offset + size_len > total)
+                    break;
+
+                char type = 0;
+                BYTE* type_string = size + 4;
+                if (type_string[0] == 1)
+                    type = (char)type_string[1];
+
+                int width = 0;
+                int height = 0;
+                int q = 4 + tlstr_len(type_string, true);
 
                 if (
-                    DragQueryFileW(
-                        drop,
-                        i,
-                        path,
-                        ARRAYSIZE(path)
-                    ) &&
-                    path[0]
+                    size_constructor == 0x75c78e60 ||
+                    size_constructor == 0x21e1ad6 ||
+                    size_constructor == 0xfa3efb95
                 ) {
-                    handled |=
-                        telegacy_clipboard_add_path(
-                            path,
-                            &edit_prepared
-                        );
+                    width = (int)read_le(size + q, 4);
+                    height = (int)read_le(size + q + 4, 4);
                 }
-            }
-        }
-    }
 
-    if (!handled) {
-        UINT png_format =
-            RegisterClipboardFormatW(
-                L"PNG"
-            );
-
-        if (
-            png_format &&
-            IsClipboardFormatAvailable(
-                png_format
-            )
-        ) {
-            HGLOBAL png =
-                (HGLOBAL)GetClipboardData(
-                    png_format
-                );
-
-            if (png) {
-                SIZE_T size = GlobalSize(png);
-                void* data = GlobalLock(png);
-
-                if (
-                    data &&
-                    size > 0 &&
-                    size <= 0x7fffffff
-                ) {
-                    wchar_t path[MAX_PATH] = {0};
-
-                    if (
-                        telegacy_clipboard_make_temp_path(
-                            L".png",
-                            path,
-                            ARRAYSIZE(path)
-                        ) &&
-                        telegacy_clipboard_write_bytes(
-                            path,
-                            data,
-                            (DWORD)size
-                        )
-                    ) {
-                        handled =
-                            telegacy_clipboard_add_path(
-                                path,
-                                &edit_prepared
-                            );
+                if (type) {
+                    if (width > 0 && height > 0) {
+                        int side = width > height ? width : height;
+                        int distance = side > 160 ? side - 160 : 160 - side;
+                        if (distance < best_distance) {
+                            best_distance = distance;
+                            best_type = type;
+                        }
+                    } else if (!best_type) {
+                        best_type = type;
                     }
                 }
 
-                if (data)
-                    GlobalUnlock(png);
+                offset += size_len;
             }
-        }
-    }
 
-    if (!handled) {
-        UINT format = 0;
+            out->thumb_type = best_type ? best_type : 'm';'''
 
-        if (IsClipboardFormatAvailable(CF_DIBV5))
-            format = CF_DIBV5;
-        else if (IsClipboardFormatAvailable(CF_DIB))
-            format = CF_DIB;
+s = s[:thumb_start] + thumb_replacement + s[thumb_end:]
 
-        if (format) {
-            HGLOBAL dib =
-                (HGLOBAL)GetClipboardData(
-                    format
-                );
-
-            wchar_t path[MAX_PATH] = {0};
-
-            if (
-                dib &&
-                telegacy_clipboard_make_temp_path(
-                    L".bmp",
-                    path,
-                    ARRAYSIZE(path)
-                ) &&
-                telegacy_clipboard_write_dib(
-                    dib,
-                    path
-                )
-            ) {
-                handled =
-                    telegacy_clipboard_add_path(
-                        path,
-                        &edit_prepared
-                    );
-            }
-        }
-    }
-
+request_selected = r'''static bool profile_gallery_request_selected(DCInfo* dcInfo) {
     if (
-        !handled &&
-        IsClipboardFormatAvailable(CF_BITMAP)
+        !profile_gallery_active ||
+        !dcInfo ||
+        profile_gallery_index < 0 ||
+        profile_gallery_index >= (int)profile_gallery_photos.size()
     ) {
-        HBITMAP bitmap =
-            (HBITMAP)GetClipboardData(
-                CF_BITMAP
-            );
-
-        wchar_t path[MAX_PATH] = {0};
-
-        if (
-            bitmap &&
-            telegacy_clipboard_make_temp_path(
-                L".bmp",
-                path,
-                ARRAYSIZE(path)
-            ) &&
-            telegacy_clipboard_write_bitmap(
-                bitmap,
-                path
-            )
-        ) {
-            handled =
-                telegacy_clipboard_add_path(
-                    path,
-                    &edit_prepared
-                );
-        }
+        return false;
     }
 
-    CloseClipboard();
+    TelegacyProfileGalleryPhoto* photo =
+        &profile_gallery_photos[profile_gallery_index];
 
-    if (handled) {
-        SendMessage(
-            hToolbar,
-            TB_CHANGEBITMAP,
-            4,
-            MAKELPARAM(14, 0)
-        );
+    int ref_len = tlstr_len(photo->file_reference, true);
+    if (ref_len <= 0 || ref_len > 4096)
+        return false;
 
-        open_files_list();
-        SetFocus(msgInput);
+    int raw_size = 60 + ref_len + 4 + 8 + 4;
+    int packet_size = raw_size + get_padding(raw_size);
+
+    BYTE* unenc_query = (BYTE*)malloc(packet_size);
+    BYTE* enc_query = (BYTE*)malloc(packet_size + 24);
+    if (!unenc_query || !enc_query) {
+        if (unenc_query) free(unenc_query);
+        if (enc_query) free(enc_query);
+        return false;
     }
 
-    return handled;
-}
+    memset(unenc_query, 0, packet_size);
+    memset(enc_query, 0, packet_size + 24);
 
-'''
+    internal_header(dcInfo, unenc_query, true);
+    memcpy(profile_gallery_file_msgid, unenc_query + 16, 8);
 
-    s = (
-        s[:msg_input_pos]
-        + clipboard_helpers
-        + s[msg_input_pos:]
-    )
+    write_le(unenc_query + 32, 0xbe5335be, 4);
+    write_le(unenc_query + 36, 0, 4);
+    write_le(unenc_query + 40, 0x40181ffe, 4);
+    memcpy(unenc_query + 44, photo->id, 8);
+    memcpy(unenc_query + 52, photo->access_hash, 8);
+    memcpy(unenc_query + 60, photo->file_reference, ref_len);
 
-    start, end = function_range(
-        s,
-        "LRESULT CALLBACK WndProcMsgInput("
-    )
+    int offset = 60 + ref_len;
+    memset(unenc_query + offset, 0, 4);
+    unenc_query[offset] = 1;
+    unenc_query[offset + 1] = photo->thumb_type;
+    offset += 4;
 
-    proc = s[start:end]
+    memset(unenc_query + offset, 0, 8);
+    offset += 8;
+    write_le(unenc_query + offset, 1048576, 4);
+    offset += 4;
 
-    proc_anchor = '''\tswitch (msg) {\n\tcase WM_CHAR:'''
-    proc_new = '''\tswitch (msg) {\n\tcase WM_PASTE:\n\t\tif (telegacy_clipboard_attach(hWnd))\n\t\t\treturn 0;\n\t\tbreak;\n\tcase WM_CHAR:'''
+    write_le(unenc_query + 28, offset - 32, 4);
+    int padding = get_padding(offset);
+    fortuna_read(unenc_query + offset, padding, &prng);
+    offset += padding;
 
-    if proc_anchor not in proc:
-        raise SystemExit(
-            "Could not locate WndProcMsgInput switch for WM_PASTE handling."
-        )
+    convert_message(dcInfo, unenc_query, enc_query, offset, 0);
+    profile_gallery_loading = true;
+    profile_gallery_update_controls();
+    send_query(dcInfo, enc_query, offset + 24);
 
-    proc = proc.replace(
-        proc_anchor,
-        proc_new,
-        1,
-    )
-
-    s = s[:start] + proc + s[end:]
-
-write(p, s)
-
-
-# -----------------------------------------------------------------------------
-# message.cpp: make the first in-chat video placeholder compact and styled the
-# same way as the Media gallery card.
-# -----------------------------------------------------------------------------
-s = read(m)
-
-if "media_chat_video_placeholder_v54" not in s:
-    placeholder_v54 = r'''static HBITMAP media_chat_video_placeholder() {
-    // media_chat_video_placeholder_v54
-    const int width = 112;
-    const int height = 84;
-
-    HDC screen = GetDC(NULL);
-    if (!screen)
-        return NULL;
-
-    HBITMAP bitmap =
-        CreateCompatibleBitmap(
-            screen,
-            width,
-            height
-        );
-
-    ReleaseDC(NULL, screen);
-
-    if (!bitmap)
-        return NULL;
-
-    HDC dc = CreateCompatibleDC(NULL);
-    HGDIOBJ old_bitmap =
-        SelectObject(dc, bitmap);
-
-    RECT all = {0, 0, width, height};
-    FillRect(
-        dc,
-        &all,
-        GetSysColorBrush(COLOR_3DFACE)
-    );
-    DrawEdge(
-        dc,
-        &all,
-        EDGE_SUNKEN,
-        BF_RECT
-    );
-
-    RECT button = {
-        width / 2 - 15,
-        height / 2 - 15,
-        width / 2 + 15,
-        height / 2 + 15
-    };
-
-    FillRect(
-        dc,
-        &button,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
-    DrawEdge(
-        dc,
-        &button,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    int cx = width / 2;
-    int cy = height / 2;
-
-    POINT tri[3] = {
-        {cx - 5, cy - 8},
-        {cx - 5, cy + 8},
-        {cx + 8, cy}
-    };
-
-    HBRUSH brush =
-        CreateSolidBrush(
-            GetSysColor(COLOR_BTNTEXT)
-        );
-    HPEN pen =
-        CreatePen(
-            PS_SOLID,
-            1,
-            GetSysColor(COLOR_BTNTEXT)
-        );
-
-    HGDIOBJ old_brush =
-        SelectObject(dc, brush);
-    HGDIOBJ old_pen =
-        SelectObject(dc, pen);
-
-    Polygon(dc, tri, 3);
-
-    SelectObject(dc, old_pen);
-    SelectObject(dc, old_brush);
-    DeleteObject(pen);
-    DeleteObject(brush);
-
-    SelectObject(dc, old_bitmap);
-    DeleteDC(dc);
-
-    return bitmap;
+    free(unenc_query);
+    free(enc_query);
+    return true;
 }'''
+s = replace_function(
+    s,
+    "static bool profile_gallery_request_selected(DCInfo* dcInfo)",
+    request_selected,
+)
 
-    s = replace_function(
-        s,
-        "static HBITMAP media_chat_video_placeholder()",
-        placeholder_v54,
-    )
+fit_insert = s.find("bool profile_gallery_handle_upload(")
+if fit_insert < 0:
+    raise SystemExit("Could not locate gallery upload handler.")
 
-write(m, s)
-
-
-# -----------------------------------------------------------------------------
-# helpers.cpp: when Telegram's real video JPEG thumbnail arrives, resize it to
-# the same compact chat card and paint the classic Play button on top BEFORE
-# replace_in_chat() inserts it.  This keeps patch_media_links_gallery.py's
-# response.cpp anchor unchanged and therefore remains compatible with it.
-# -----------------------------------------------------------------------------
-s = read(g)
-
-if "media_chat_video_preview_v54" not in s:
-    replace_pos = s.find(
-        "int replace_in_chat("
-    )
-
-    if replace_pos < 0:
-        raise SystemExit(
-            "Could not locate replace_in_chat for compact video previews."
-        )
-
-    video_helper = r'''
-// media_chat_video_preview_v54
-static HBITMAP media_chat_make_video_preview(
-    HBITMAP source
-) {
+fit_code = r'''
+HBITMAP profile_gallery_fit_bitmap(HBITMAP source) {
     if (!source)
         return NULL;
 
     BITMAP bm = {0};
+    if (!GetObject(source, sizeof(bm), &bm))
+        return source;
 
-    if (!GetObject(
-        source,
-        sizeof(bm),
-        &bm
-    )) {
-        return NULL;
-    }
+    int src_w = bm.bmWidth;
+    int src_h = bm.bmHeight < 0 ? -bm.bmHeight : bm.bmHeight;
+    if (src_w <= 0 || src_h <= 0)
+        return source;
 
-    if (
-        bm.bmWidth <= 0 ||
-        bm.bmHeight <= 0
-    ) {
-        return NULL;
-    }
-
-    const int width = 112;
-    const int height = 84;
-    const int inset = 3;
+    const int dst_w = 160;
+    const int dst_h = 160;
+    if (src_w == dst_w && src_h == dst_h)
+        return source;
 
     HDC screen = GetDC(NULL);
     if (!screen)
-        return NULL;
+        return source;
 
-    HBITMAP result =
-        CreateCompatibleBitmap(
-            screen,
-            width,
-            height
-        );
-
-    if (!result) {
-        ReleaseDC(NULL, screen);
-        return NULL;
-    }
-
-    HDC dst = CreateCompatibleDC(screen);
-    HDC src = CreateCompatibleDC(screen);
-
+    HBITMAP fitted = CreateCompatibleBitmap(screen, dst_w, dst_h);
     ReleaseDC(NULL, screen);
+    if (!fitted)
+        return source;
 
-    if (!dst || !src) {
-        if (dst) DeleteDC(dst);
-        if (src) DeleteDC(src);
-        DeleteObject(result);
-        return NULL;
+    HDC src_dc = CreateCompatibleDC(NULL);
+    HDC dst_dc = CreateCompatibleDC(NULL);
+    if (!src_dc || !dst_dc) {
+        if (src_dc) DeleteDC(src_dc);
+        if (dst_dc) DeleteDC(dst_dc);
+        DeleteObject(fitted);
+        return source;
     }
 
-    HGDIOBJ old_dst =
-        SelectObject(dst, result);
-    HGDIOBJ old_src =
-        SelectObject(src, source);
+    HGDIOBJ old_src = SelectObject(src_dc, source);
+    HGDIOBJ old_dst = SelectObject(dst_dc, fitted);
 
-    RECT all = {0, 0, width, height};
+    RECT rc = {0, 0, dst_w, dst_h};
     FillRect(
-        dst,
-        &all,
-        (HBRUSH)GetStockObject(BLACK_BRUSH)
+        dst_dc,
+        &rc,
+        hBrushes[1] ? hBrushes[1] : GetSysColorBrush(COLOR_WINDOW)
     );
 
-    int area_w = width - inset * 2;
-    int area_h = height - inset * 2;
+    double sx = (double)dst_w / (double)src_w;
+    double sy = (double)dst_h / (double)src_h;
+    double scale = sx < sy ? sx : sy;
 
-    double scale_x =
-        (double)area_w /
-        (double)bm.bmWidth;
-    double scale_y =
-        (double)area_h /
-        (double)bm.bmHeight;
-    double scale =
-        scale_x < scale_y
-            ? scale_x
-            : scale_y;
-
-    int draw_w =
-        (int)(bm.bmWidth * scale + 0.5);
-    int draw_h =
-        (int)(bm.bmHeight * scale + 0.5);
-
+    int draw_w = (int)(src_w * scale);
+    int draw_h = (int)(src_h * scale);
     if (draw_w < 1) draw_w = 1;
     if (draw_h < 1) draw_h = 1;
 
-    int draw_x =
-        (width - draw_w) / 2;
-    int draw_y =
-        (height - draw_h) / 2;
+    int draw_x = (dst_w - draw_w) / 2;
+    int draw_y = (dst_h - draw_h) / 2;
 
-    SetStretchBltMode(
-        dst,
-        HALFTONE
-    );
-
-    SetBrushOrgEx(
-        dst,
-        0,
-        0,
-        NULL
-    );
-
+    SetStretchBltMode(dst_dc, HALFTONE);
+    SetBrushOrgEx(dst_dc, 0, 0, NULL);
     StretchBlt(
-        dst,
-        draw_x,
-        draw_y,
-        draw_w,
-        draw_h,
-        src,
-        0,
-        0,
-        bm.bmWidth,
-        bm.bmHeight,
+        dst_dc,
+        draw_x, draw_y, draw_w, draw_h,
+        src_dc,
+        0, 0, src_w, src_h,
         SRCCOPY
     );
 
-    DrawEdge(
-        dst,
-        &all,
-        EDGE_SUNKEN,
-        BF_RECT
-    );
+    SelectObject(src_dc, old_src);
+    SelectObject(dst_dc, old_dst);
+    DeleteDC(src_dc);
+    DeleteDC(dst_dc);
 
-    RECT button = {
-        width / 2 - 15,
-        height / 2 - 15,
-        width / 2 + 15,
-        height / 2 + 15
-    };
+    return fitted;
+}
 
-    FillRect(
-        dst,
-        &button,
-        GetSysColorBrush(COLOR_BTNFACE)
-    );
+'''
+s = s[:fit_insert] + fit_code + s[fit_insert:]
 
-    DrawEdge(
-        dst,
-        &button,
-        EDGE_RAISED,
-        BF_RECT
-    );
-
-    int cx = width / 2;
-    int cy = height / 2;
-
-    POINT tri[3] = {
-        {cx - 5, cy - 8},
-        {cx - 5, cy + 8},
-        {cx + 8, cy}
-    };
-
-    HBRUSH glyph_brush =
-        CreateSolidBrush(
-            GetSysColor(COLOR_BTNTEXT)
+old_bitmap = r'''    HBITMAP bitmap = jpg_to_bmp(response + 12 + header, bytes_len);
+    if (bitmap) {
+        HBITMAP old = (HBITMAP)SendMessageW(
+            profile_gallery_picture,
+            STM_SETIMAGE,
+            IMAGE_BITMAP,
+            (LPARAM)bitmap
         );
 
-    HPEN glyph_pen =
-        CreatePen(
-            PS_SOLID,
-            1,
-            GetSysColor(COLOR_BTNTEXT)
+        if (old && old != bitmap)
+            DeleteObject(old);
+    }
+
+    profile_gallery_update_controls();'''
+
+new_bitmap = r'''    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);
+    if (decoded) {
+        HBITMAP bitmap = profile_gallery_fit_bitmap(decoded);
+        if (bitmap != decoded)
+            DeleteObject(decoded);
+
+        HBITMAP old = (HBITMAP)SendMessageW(
+            profile_gallery_picture,
+            STM_SETIMAGE,
+            IMAGE_BITMAP,
+            (LPARAM)bitmap
         );
 
-    HGDIOBJ old_brush =
-        SelectObject(
-            dst,
-            glyph_brush
-        );
-    HGDIOBJ old_pen =
-        SelectObject(
-            dst,
-            glyph_pen
+        SetWindowPos(
+            profile_gallery_picture,
+            NULL,
+            10, 10, 160, 160,
+            SWP_NOZORDER | SWP_NOACTIVATE
         );
 
-    Polygon(
-        dst,
-        tri,
-        3
+        if (old && old != bitmap)
+            DeleteObject(old);
+    }
+
+    profile_gallery_update_controls();'''
+
+if old_bitmap not in s:
+    raise SystemExit("Could not locate historical avatar bitmap assignment.")
+s = s.replace(old_bitmap, new_bitmap, 1)
+
+# Use a real messages.getDialogs limit instead of zero. The previous zero-limit
+# path returned about 20 dialogs per request and triggered FLOOD_WAIT on large
+# accounts.
+gd_start, gd_end = function_range(s, "void get_dialogs()")
+gd = s[gd_start:gd_end]
+gd_old = "\tmemset(unenc_query + 52, 0, 12);"
+gd_new = (
+    "\twrite_le(unenc_query + 52, LATVIANGHOST_DIALOGS_PAGE_SIZE, 4);\n"
+    "\tmemset(unenc_query + 56, 0, 8);"
+)
+if gd_old not in gd:
+    raise SystemExit("Could not locate messages.getDialogs limit/hash fields.")
+gd = gd.replace(gd_old, gd_new, 1)
+s = s[:gd_start] + gd + s[gd_end:]
+
+write(helpers, s)
+
+# ---------------------------------------------------------------------------
+# procs.cpp: do not retain a transient member pointer in a user profile, and
+# prefer stable global Peer objects for nickname navigation.
+# ---------------------------------------------------------------------------
+s = read(p)
+
+s = s.replace(
+    "\t\tprofile_dialog_peer = peer;",
+    "\t\tprofile_dialog_peer = (peer && peer->type == 1) ? peer : NULL;",
+    1,
+)
+
+safe_find_peer = r'''static Peer* profile_nav_find_peer(
+    const BYTE* peer_id,
+    char peer_type
+) {
+    if (!peer_id)
+        return NULL;
+
+    if (peer_type == 0 && memcmp(myself.id, peer_id, 8) == 0)
+        return &myself;
+
+    for (int i = 0; i < peers_count; i++) {
+        if (
+            peers[i].type == peer_type &&
+            memcmp(peers[i].id, peer_id, 8) == 0
+        ) {
+            return &peers[i];
+        }
+    }
+
+    if (
+        current_peer &&
+        current_peer->type == 1 &&
+        current_peer->chat_users
+    ) {
+        for (int i = 0; i < (int)current_peer->chat_users->size(); i++) {
+            Peer* candidate = &current_peer->chat_users->at(i);
+            if (
+                candidate->type == peer_type &&
+                memcmp(candidate->id, peer_id, 8) == 0
+            ) {
+                return candidate;
+            }
+        }
+    }
+
+    if (
+        current_peer &&
+        current_peer->type == peer_type &&
+        memcmp(current_peer->id, peer_id, 8) == 0
+    ) {
+        return current_peer;
+    }
+
+    return NULL;
+}'''
+
+s = replace_function(
+    s,
+    "static Peer* profile_nav_find_peer(",
+    safe_find_peer,
+)
+
+write(p, s)
+
+# ---------------------------------------------------------------------------
+# telegacy.cpp: undo the unsafe variable-height combo introduced by the Links
+# patch. Fixed item heights keep scrolling stable and do not hide chats whose
+# names are still being resolved.
+# ---------------------------------------------------------------------------
+s = read(t)
+
+combo_start = s.find("hComboBoxChats = CreateWindow(")
+if combo_start < 0:
+    raise SystemExit("Could not locate chat combobox creation.")
+combo_end = s.find(");", combo_start)
+if combo_end < 0:
+    raise SystemExit("Could not locate chat combobox creation terminator.")
+
+combo_fragment = s[combo_start:combo_end]
+if "CBS_OWNERDRAWVARIABLE" in combo_fragment:
+    combo_fragment = combo_fragment.replace(
+        "CBS_OWNERDRAWVARIABLE",
+        "CBS_OWNERDRAWFIXED",
+        1,
+    )
+elif "CBS_OWNERDRAWFIXED" not in combo_fragment:
+    raise SystemExit("Unexpected chat combobox owner-draw style.")
+
+s = s[:combo_start] + combo_fragment + s[combo_end:]
+
+unsafe_dropdown = '''if (HIWORD(wParam) == CBN_DROPDOWN) {
+                telegacy_hide_phantom_chat_rows();
+                if (nt3)
+                    nt3_combobox_fit(hComboBoxChats);
+            }'''
+
+if unsafe_dropdown in s:
+    s = s.replace(
+        unsafe_dropdown,
+        "if (nt3 && HIWORD(wParam) == CBN_DROPDOWN) nt3_combobox_fit(hComboBoxChats);",
+        1,
+    )
+else:
+    s = s.replace(
+        "                telegacy_hide_phantom_chat_rows();\n",
+        "",
+        1,
+    )
+
+write(t, s)
+
+# ---------------------------------------------------------------------------
+# response.cpp: preserve combo viewport as dialog pages arrive and always fit
+# the legacy/current avatar into the original 160x160 profile box.
+# ---------------------------------------------------------------------------
+s = read(r)
+
+combo_add_anchor = '''\t\tfor (i = peers_count_old; i < peers_count; i++) {
+\t\t\tSendMessage(hComboBoxChats, CB_ADDSTRING, 0, (LPARAM)peers[folders[0].peers[i]].name);
+\t\t\tSendMessage(hComboBoxChats, CB_SETITEMDATA, i, (LPARAM)&peers[folders[0].peers[i]]);
+\t\t}'''
+
+combo_add_replacement = '''\t\tint lg_combo_top = (int)SendMessage(hComboBoxChats, CB_GETTOPINDEX, 0, 0);
+\t\tBOOL lg_combo_dropped = (BOOL)SendMessage(hComboBoxChats, CB_GETDROPPEDSTATE, 0, 0);
+\t\tSendMessage(hComboBoxChats, WM_SETREDRAW, FALSE, 0);
+\t\tfor (i = peers_count_old; i < peers_count; i++) {
+\t\t\tSendMessage(hComboBoxChats, CB_ADDSTRING, 0, (LPARAM)peers[folders[0].peers[i]].name);
+\t\t\tSendMessage(hComboBoxChats, CB_SETITEMDATA, i, (LPARAM)&peers[folders[0].peers[i]]);
+\t\t}
+\t\tif (lg_combo_dropped && lg_combo_top != CB_ERR)
+\t\t\tSendMessage(hComboBoxChats, CB_SETTOPINDEX, lg_combo_top, 0);
+\t\tSendMessage(hComboBoxChats, WM_SETREDRAW, TRUE, 0);
+\t\tInvalidateRect(hComboBoxChats, NULL, FALSE);'''
+
+if combo_add_anchor not in s:
+    raise SystemExit("Could not locate chat combo append loop.")
+s = s.replace(combo_add_anchor, combo_add_replacement, 1)
+
+pfp_old = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {
+\t\t\tif (profile_gallery_showing_current() && dlgPic && IsWindow(dlgPic)) {
+\t\t\t\tint bytes_len = tlstr_len(unenc_response + 12, false);
+\t\t\t\tint bytes_header = bytes_len >= 254 ? 4 : 1;
+\t\t\t\tHBITMAP hBmp = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);
+\t\t\t\tif (hBmp) {
+\t\t\t\t\tHBITMAP oldBmp = (HBITMAP)SendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+\t\t\t\t\tif (oldBmp && oldBmp != hBmp) DeleteObject(oldBmp);
+\t\t\t\t}
+\t\t\t}
+\t\t\tbreak;
+\t\t}'''
+
+pfp_new = '''\t\tif (memcmp(pfp_msgid, last_rpcresult_msgid, 8) == 0) {
+\t\t\tif (profile_gallery_showing_current() && dlgPic && IsWindow(dlgPic)) {
+\t\t\t\tint bytes_len = tlstr_len(unenc_response + 12, false);
+\t\t\t\tint bytes_header = bytes_len >= 254 ? 4 : 1;
+\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);
+\t\t\t\tif (decoded) {
+\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);
+\t\t\t\t\tif (hBmp != decoded) DeleteObject(decoded);
+\t\t\t\t\tHBITMAP oldBmp = (HBITMAP)SendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);
+\t\t\t\t\tSetWindowPos(dlgPic, NULL, 10, 10, 160, 160, SWP_NOZORDER | SWP_NOACTIVATE);
+\t\t\t\t\tif (oldBmp && oldBmp != hBmp) DeleteObject(oldBmp);
+\t\t\t\t}
+\t\t\t}
+\t\t\tbreak;
+\t\t}'''
+
+if pfp_old not in s:
+    raise SystemExit("Could not locate current-avatar response block.")
+s = s.replace(pfp_old, pfp_new, 1)
+
+write(r, s)
+
+# ---------------------------------------------------------------------------
+# v2 verification
+# ---------------------------------------------------------------------------
+checks_v2 = {
+    h: [
+        "profile_navigation_latvianghost_v2",
+        "LATVIANGHOST_DIALOGS_PAGE_SIZE",
+        "profile_gallery_fit_bitmap",
+    ],
+    helpers: [
+        "profile_gallery_peer_had_current_photo",
+        "profile_gallery_fit_bitmap",
+        "LATVIANGHOST_DIALOGS_PAGE_SIZE",
+        "packet_size = raw_size + get_padding(raw_size)",
+    ],
+    p: [
+        "profile_dialog_peer = (peer && peer->type == 1) ? peer : NULL",
+        "static Peer* profile_nav_find_peer",
+    ],
+    t: [
+        "CBS_OWNERDRAWFIXED",
+    ],
+    r: [
+        "CB_GETTOPINDEX",
+        "profile_gallery_fit_bitmap(decoded)",
+        "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160",
+    ],
+}
+
+for path, tokens in checks_v2.items():
+    text = read(path)
+    for token in tokens:
+        if token not in text:
+            raise SystemExit(
+                f"Profile navigation v2 verification failed in {path.name}: {token}"
+            )
+
+print(
+    "Applied LatvianGhost profile navigation v2: clickable nicknames, "
+    "participant profiles, bounded avatar gallery, stable chat scrolling, "
+    "and larger dialog batches."
+)
+
+
+# =============================================================================
+# LatvianGhost profile navigation v3
+# Larger 220x220 avatar gallery, square frame, and per-preview pixel/byte info.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# telegacy.h — metadata label shared by procs/helpers/response.
+# ---------------------------------------------------------------------------
+s = read(h)
+
+if "profile_navigation_latvianghost_v3" not in s:
+    marker = "// profile_navigation_latvianghost_v2"
+    if marker not in s:
+        raise SystemExit("Profile navigation v2 marker is missing before v3.")
+
+    decl_anchor = "HBITMAP profile_gallery_fit_bitmap(HBITMAP source);"
+    if decl_anchor not in s:
+        raise SystemExit("Could not locate profile gallery bitmap declaration.")
+
+    s = s.replace(
+        decl_anchor,
+        decl_anchor
+        + "\nextern HWND profile_gallery_metadata;"
+        + "\nvoid profile_gallery_update_metadata(HBITMAP source, __int64 encoded_size);"
+        + "\n// profile_navigation_latvianghost_v3",
+        1,
+    )
+
+write(h, s)
+
+# ---------------------------------------------------------------------------
+# helpers.cpp — 220x220 fitting and metadata text.
+# ---------------------------------------------------------------------------
+s = read(helpers)
+
+if "profile_gallery_metadata = NULL" not in s:
+    global_anchor = "static bool profile_gallery_peer_had_current_photo = false;"
+    if global_anchor not in s:
+        raise SystemExit("Could not locate profile gallery globals for v3.")
+
+    s = s.replace(
+        global_anchor,
+        global_anchor + "\nHWND profile_gallery_metadata = NULL;",
+        1,
+    )
+
+# Grow only the fitted profile bitmap, not every image path in the client.
+fit_start, fit_end = function_range(s, "HBITMAP profile_gallery_fit_bitmap(HBITMAP source)")
+fit_func = s[fit_start:fit_end]
+
+if "const int dst_w = 160;" not in fit_func or "const int dst_h = 160;" not in fit_func:
+    raise SystemExit("Could not locate 160x160 avatar fitter in v2 output.")
+
+fit_func = fit_func.replace("const int dst_w = 160;", "const int dst_w = 220;", 1)
+fit_func = fit_func.replace("const int dst_h = 160;", "const int dst_h = 220;", 1)
+s = s[:fit_start] + fit_func + s[fit_end:]
+
+# Metadata helper: decoded dimensions + actual downloaded JPEG byte count.
+meta_insert = s.find("HBITMAP profile_gallery_fit_bitmap(HBITMAP source)")
+if meta_insert < 0:
+    raise SystemExit("Could not locate metadata helper insertion point.")
+
+meta_code = r'''
+void profile_gallery_update_metadata(
+    HBITMAP source,
+    __int64 encoded_size
+) {
+    if (
+        !profile_gallery_metadata ||
+        !IsWindow(profile_gallery_metadata)
+    ) {
+        return;
+    }
+
+    if (!source) {
+        SetWindowTextW(
+            profile_gallery_metadata,
+            L""
+        );
+        return;
+    }
+
+    BITMAP bm = {0};
+    if (!GetObject(source, sizeof(bm), &bm)) {
+        SetWindowTextW(
+            profile_gallery_metadata,
+            L""
+        );
+        return;
+    }
+
+    int width = bm.bmWidth;
+    int height = bm.bmHeight < 0 ? -bm.bmHeight : bm.bmHeight;
+
+    wchar_t size_text[48] = {0};
+
+    if (encoded_size < 0)
+        encoded_size = 0;
+
+    if (encoded_size < 1024) {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%I64d B",
+            encoded_size
+        );
+    } else if (encoded_size < 1024LL * 1024LL) {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%.1f KB",
+            (double)encoded_size / 1024.0
+        );
+    } else {
+        _snwprintf(
+            size_text,
+            ARRAYSIZE(size_text) - 1,
+            L"%.2f MB",
+            (double)encoded_size / (1024.0 * 1024.0)
+        );
+    }
+
+    wchar_t text[128] = {0};
+    _snwprintf(
+        text,
+        ARRAYSIZE(text) - 1,
+        L"%d x %d px   |   %s",
+        width,
+        height,
+        size_text
     );
+    text[ARRAYSIZE(text) - 1] = 0;
 
-    SelectObject(dst, old_pen);
-    SelectObject(dst, old_brush);
-    DeleteObject(glyph_pen);
-    DeleteObject(glyph_brush);
-
-    SelectObject(src, old_src);
-    SelectObject(dst, old_dst);
-    DeleteDC(src);
-    DeleteDC(dst);
-
-    return result;
+    SetWindowTextW(
+        profile_gallery_metadata,
+        text
+    );
 }
 
 '''
 
-    s = (
-        s[:replace_pos]
-        + video_helper
-        + s[replace_pos:]
+if "void profile_gallery_update_metadata(" not in s:
+    s = s[:meta_insert] + meta_code + s[meta_insert:]
+
+# Historical avatar upload: report dimensions/weight before fitting and keep
+# the bitmap control locked to the new square.
+upload_start, upload_end = function_range(s, "bool profile_gallery_handle_upload(")
+upload_func = s[upload_start:upload_end]
+
+old_decoded = "    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);\n    if (decoded) {"
+new_decoded = (
+    "    HBITMAP decoded = jpg_to_bmp(response + 12 + header, bytes_len);\n"
+    "    if (decoded) {\n"
+    "        profile_gallery_update_metadata(decoded, bytes_len);"
+)
+if old_decoded not in upload_func:
+    raise SystemExit("Could not locate historical avatar decode block for v3.")
+upload_func = upload_func.replace(old_decoded, new_decoded, 1)
+upload_func = upload_func.replace(
+    "            10, 10, 160, 160,",
+    "            10, 10, 220, 220,",
+    1,
+)
+s = s[:upload_start] + upload_func + s[upload_end:]
+
+# Clear stale metadata when the profile/gallery closes.
+clear_start, clear_end = function_range(s, "void profile_gallery_clear()")
+clear_func = s[clear_start:clear_end]
+if "profile_gallery_metadata = NULL;" not in clear_func:
+    brace = clear_func.find("{")
+    clear_func = (
+        clear_func[:brace + 1]
+        + "\n    profile_gallery_metadata = NULL;"
+        + clear_func[brace + 1:]
+    )
+s = s[:clear_start] + clear_func + s[clear_end:]
+
+write(helpers, s)
+
+# ---------------------------------------------------------------------------
+# procs.cpp — larger square preview and clean metadata/navigation row.
+# ---------------------------------------------------------------------------
+s = read(p)
+
+# The v1 block already creates arrows for users. Re-layout only that user
+# branch so group/channel profile geometry is unchanged.
+user_block_anchor = r'''        if (peer->type == 0) {
+            profile_photo_previous = CreateWindowW('''
+if user_block_anchor not in s:
+    raise SystemExit("Could not locate user avatar navigation block for v3.")
+
+user_block_prefix = r'''        if (peer->type == 0) {
+            // v3: make the avatar a larger square without allowing it to
+            // overlap the profile fields on the right.
+            SetWindowPos(dlgPic, NULL, 10, 10, 220, 220, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(name, NULL, 240, 10, 300, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(handle, NULL, 240, 55, 120, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(about, NULL, 370, 55, 170, 120, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelHandle, NULL, 240, 40, 120, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelAbout, NULL, 370, 40, 170, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hLabelBirthday, NULL, 240, 85, 120, 15, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(birthday, NULL, 240, 100, 120, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hButtonOk, NULL, 240, 145, 55, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+            SetWindowPos(hButtonCancel, NULL, 305, 145, 55, 25, SWP_NOZORDER | SWP_NOACTIVATE);
+
+            profile_gallery_metadata = CreateWindowW(
+                L"STATIC", L"",
+                WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+                10, 234, 220, 18,
+                hDlg, NULL, NULL, NULL
+            );
+
+            profile_photo_previous = CreateWindowW('''
+
+s = s.replace(user_block_anchor, user_block_prefix, 1)
+
+# Move the three navigation controls below the metadata line.
+s = s.replace(
+    '''                10, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_PREV_BUTTON, NULL, NULL''',
+    '''                10, 256, 52, 23,
+                hDlg, (HMENU)PROFILE_PREV_BUTTON, NULL, NULL''',
+    1,
+)
+s = s.replace(
+    '''                56, 174, 68, 23,
+                hDlg, NULL, NULL, NULL''',
+    '''                66, 256, 108, 23,
+                hDlg, NULL, NULL, NULL''',
+    1,
+)
+s = s.replace(
+    '''                128, 174, 42, 23,
+                hDlg, (HMENU)PROFILE_NEXT_BUTTON, NULL, NULL''',
+    '''                178, 256, 52, 23,
+                hDlg, (HMENU)PROFILE_NEXT_BUTTON, NULL, NULL''',
+    1,
+)
+
+# The old user-only resize added 30 px vertically. Widen for shifted fields and
+# add enough height for the metadata + navigation row.
+old_resize = r'''            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left,
+                wr.bottom - wr.top + 30,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );'''
+new_resize = r'''            SetWindowPos(
+                hDlg, NULL,
+                0, 0,
+                wr.right - wr.left + 60,
+                wr.bottom - wr.top + 112,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );'''
+if old_resize not in s:
+    raise SystemExit("Could not locate user profile dialog resize block for v3.")
+s = s.replace(old_resize, new_resize, 1)
+
+# If the user has no avatar, show an explicit metadata message instead of an
+# empty size field. The metadata control already exists at this point.
+placeholder_anchor = '''\t\t\tSendMessage(dlgPic, STM_SETIMAGE, IMAGE_BITMAP, (LPARAM)hBmp);'''
+placeholder_replacement = placeholder_anchor + '''\n\t\t\tif (peer->type == 0 && profile_gallery_metadata)\n\t\t\t\tSetWindowTextW(profile_gallery_metadata, L"No image");'''
+if placeholder_anchor not in s:
+    raise SystemExit("Could not locate profile placeholder assignment for v3.")
+s = s.replace(placeholder_anchor, placeholder_replacement, 1)
+
+write(p, s)
+
+# ---------------------------------------------------------------------------
+# response.cpp — current avatar metadata and 220x220 square fit.
+# ---------------------------------------------------------------------------
+s = read(r)
+
+# There are several pfp_msgid checks in response.cpp (including migration /
+# retry paths).  Do not grab the first one.  Target the exact decoded-bitmap
+# sequence installed by our v2 patch above.
+current_avatar_anchor = (
+    "\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);\n"
+    "\t\t\t\tif (decoded) {\n"
+    "\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
+)
+current_avatar_replacement = (
+    "\t\t\t\tHBITMAP decoded = jpg_to_bmp(unenc_response + 12 + bytes_header, bytes_len);\n"
+    "\t\t\t\tif (decoded) {\n"
+    "\t\t\t\t\tprofile_gallery_update_metadata(decoded, bytes_len);\n"
+    "\t\t\t\t\tHBITMAP hBmp = profile_gallery_fit_bitmap(decoded);"
+)
+
+if current_avatar_anchor not in s:
+    raise SystemExit(
+        "Could not locate the v2 current-avatar decode block for v3 metadata."
     )
 
-    start, end = function_range(
-        s,
-        "int replace_in_chat("
-    )
+s = s.replace(
+    current_avatar_anchor,
+    current_avatar_replacement,
+    1,
+)
 
-    func = s[start:end]
+# Resize only the SetWindowPos which belongs to that same current-avatar path.
+# Start searching immediately after the unique metadata call we just inserted,
+# so other 160x160 controls elsewhere in response.cpp are left untouched.
+meta_pos = s.find(
+    "profile_gallery_update_metadata(decoded, bytes_len);"
+)
+if meta_pos < 0:
+    raise SystemExit("Current-avatar metadata insertion disappeared unexpectedly.")
 
-    bitmap_old = r'''\t\t} else if (hBitmap) {
-\t\t\tCHARFORMAT2 cf;
-\t\t\tcf.cbSize = sizeof(CHARFORMAT2);
-\t\t\tcf.dwMask = CFM_LINK;
-\t\t\tSendMessage(chat, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
-\t\t\tinsert_image(chat, NULL, hBitmap);
-\t\t\tSendMessage(chat, EM_SETSEL, min, max);
-\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
-\t\t\tdiff = 0;'''.replace('\\t', '\t')
+size_old = "SetWindowPos(dlgPic, NULL, 10, 10, 160, 160,"
+size_pos = s.find(size_old, meta_pos)
+if size_pos < 0:
+    raise SystemExit("Could not locate current-avatar 160x160 SetWindowPos for v3.")
 
-    bitmap_new = r'''\t\t} else if (hBitmap) {
-\t\t\tCHARFORMAT2 cf;
-\t\t\tcf.cbSize = sizeof(CHARFORMAT2);
-\t\t\tcf.dwMask = CFM_LINK;
-\t\t\tSendMessage(chat, EM_GETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
+s = (
+    s[:size_pos]
+    + "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220,"
+    + s[size_pos + len(size_old):]
+)
 
-\t\t\tHBITMAP display_bitmap = hBitmap;
-\t\t\tHBITMAP video_preview = NULL;
+write(r, s)
 
-\t\t\tfor (
-\t\t\t\tint k = 0;
-\t\t\t\tk < (int)documents.size();
-\t\t\t\tk++
-\t\t\t) {
-\t\t\t\tif (
-\t\t\t\t\tdocuments[k].photo_size == 3 &&
-\t\t\t\t\tdocuments[k].visible &&
-\t\t\t\t\tdocuments[k].min == min &&
-\t\t\t\t\tdocuments[k].max == max
-\t\t\t\t) {
-\t\t\t\t\tvideo_preview =
-\t\t\t\t\t\tmedia_chat_make_video_preview(
-\t\t\t\t\t\t\thBitmap
-\t\t\t\t\t\t);
-
-\t\t\t\t\tif (video_preview)
-\t\t\t\t\t\tdisplay_bitmap = video_preview;
-
-\t\t\t\t\tbreak;
-\t\t\t\t}
-\t\t\t}
-
-\t\t\tinsert_image(
-\t\t\t\tchat,
-\t\t\t\tNULL,
-\t\t\t\tdisplay_bitmap
-\t\t\t);
-
-\t\t\tif (video_preview)
-\t\t\t\tDeleteObject(video_preview);
-
-\t\t\tSendMessage(chat, EM_SETSEL, min, max);
-\t\t\tSendMessage(chat, EM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&cf);
-\t\t\tdiff = 0;'''.replace('\\t', '\t')
-
-    if bitmap_old not in func:
-        raise SystemExit(
-            "Could not locate bitmap replacement branch in replace_in_chat."
-        )
-
-    func = func.replace(
-        bitmap_old,
-        bitmap_new,
-        1,
-    )
-
-    s = s[:start] + func + s[end:]
-
-write(g, s)
-
-
-# -----------------------------------------------------------------------------
-# v5.4 verification
-# -----------------------------------------------------------------------------
-checks_v54 = {
+# ---------------------------------------------------------------------------
+# v3 verification
+# ---------------------------------------------------------------------------
+checks_v3 = {
     h: [
-        "#include <shellapi.h>",
+        "profile_navigation_latvianghost_v3",
+        "profile_gallery_update_metadata",
     ],
-    r: [
-        "history_view_anchor_v54",
-        "EM_GETSCROLLPOS",
-        "EM_SETSCROLLPOS",
-        "drawchat = false",
+    helpers: [
+        "const int dst_w = 220",
+        "const int dst_h = 220",
+        "profile_gallery_metadata = NULL",
+        "profile_gallery_update_metadata(decoded, bytes_len)",
     ],
     p: [
-        "clipboard_attachment_v54",
-        "case WM_PASTE:",
-        "CF_HDROP",
-        "CF_DIBV5",
-        "bool* edit_prepared",
-        'RegisterClipboardFormatW(\n                L"PNG"',
-        "open_files_list();",
+        "10, 10, 220, 220",
+        "10, 234, 220, 18",
+        "10, 256, 52, 23",
+        "wr.right - wr.left + 60",
     ],
-    m: [
-        "media_chat_video_placeholder_v54",
-        "const int width = 112;",
-        "const int height = 84;",
-    ],
-    g: [
-        "media_chat_video_preview_v54",
-        "media_chat_make_video_preview(",
-        "documents[k].photo_size == 3",
+    r: [
+        "profile_gallery_update_metadata(decoded, bytes_len)",
+        "SetWindowPos(dlgPic, NULL, 10, 10, 220, 220",
     ],
 }
 
-for path, tokens in checks_v54.items():
+for path, tokens in checks_v3.items():
     text = read(path)
-
     for token in tokens:
         if token not in text:
             raise SystemExit(
-                f"Media v5.4 verification failed in {path.name}: {token}"
+                f"Profile navigation v3 verification failed in {path.name}: {token}"
             )
 
 print(
-    "Applied Media v5.4: stable history viewport, Ctrl+V clipboard attachments, "
-    "and compact in-chat video previews with a classic Play overlay."
+    "Applied LatvianGhost profile navigation v3: larger 220x220 square avatar "
+    "gallery with pixel dimensions and downloaded preview size."
 )
