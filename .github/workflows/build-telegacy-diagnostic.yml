@@ -118,6 +118,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_chat_video_reactions.py" "telegacy-src"
 
+      - name: Normalize chat media cards and require video double-click
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_chat_media_layout.py" "telegacy-src"
+
       - name: Show toolchain
         shell: pwsh
         run: |
