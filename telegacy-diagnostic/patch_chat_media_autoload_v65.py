@@ -25,7 +25,7 @@ def write(path, data):
 
 
 # This patch deliberately runs before the v6.0/v6.4 chat-media layout patches.
-# It only changes the policy gates that decide whether ordinary chat photos are
+# It changes the policy gates that decide whether ordinary chat photos are
 # requested from Telegram. v6.4 later redirects those requests to the full-photo
 # loader. IMAGELOADPOLICY==0 remains the explicit no-network-image mode.
 if "chat_media_autoload_v65" in read(t):
@@ -79,8 +79,35 @@ for path, tokens in checks.items():
                 f"Chat media autoload v6.5 verification failed in {path.name}: {token}"
             )
 
+# The workflow invokes v6.4 later. Append the v6.6 media-DC retry hook to that
+# local helper file so no extra workflow step is required. This is intentionally
+# a runner-local modification; the repository's v6.4 source remains readable.
+v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
+v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
+if not v64.exists():
+    raise SystemExit(f"Missing future v6.4 chat media patch: {v64}")
+if not v66.exists():
+    raise SystemExit(f"Missing v6.6 media-DC retry patch: {v66}")
+
+chain_marker = "# chat_media_dc_retry_v66_chain"
+v64_text = v64.read_text(encoding="utf-8")
+if chain_marker not in v64_text:
+    v64_text += r'''
+
+# chat_media_dc_retry_v66_chain
+import subprocess as _chat_media_v66_subprocess
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")),
+        str(root),
+    ]
+)
+'''
+    v64.write_text(v64_text, encoding="utf-8", newline="\n")
+
 print(
     "Applied chat media autoload v6.5: ordinary chat photos now request server/full "
-    "images whenever image loading is enabled (IMAGELOADPOLICY != 0), including "
-    "normal dialogs, history, search context, and media jumps."
+    "images whenever image loading is enabled, and v6.4 is chained to the v6.6 "
+    "Telegram media-DC retry fix."
 )
