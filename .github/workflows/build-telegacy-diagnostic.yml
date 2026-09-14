@@ -91,6 +91,11 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_media_tabs_av.py" "telegacy-src"
 
+      - name: Fix inline audio switching and in-chat video cards
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_media_audio_video_fix.py" "telegacy-src"
+
       - name: Add Media links, fix chat list and grouped gallery
         shell: pwsh
         run: |
