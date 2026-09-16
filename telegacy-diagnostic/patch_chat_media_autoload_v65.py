@@ -25,9 +25,6 @@ def write(path, data):
     path.write_text(data, encoding="latin-1", newline="\r\n")
 
 
-# Keep chat image autoload enabled for every non-zero image policy. The later
-# chat-media patches provide a server preview while retaining a stripped-image
-# fallback so a failed/migrated preview can never leave a featureless blank card.
 if "chat_media_autoload_v65" in read(t):
     print("Chat media autoload v6.5 already applied.")
     raise SystemExit(0)
@@ -60,49 +57,32 @@ s = s.replace(anchor, anchor + "\n// chat_media_autoload_v65", 1)
 write(t, s)
 
 checks = {
-    m: [
-        "IMAGELOADPOLICY != 0) get_photo(NULL, &document, &dcInfoMain); // chat_media_autoload_v65",
-    ],
-    r: [
-        "IMAGELOADPOLICY != 0 &&",
-    ],
-    t: [
-        "chat_media_autoload_v65",
-    ],
+    m: ["IMAGELOADPOLICY != 0) get_photo(NULL, &document, &dcInfoMain); // chat_media_autoload_v65"],
+    r: ["IMAGELOADPOLICY != 0 &&"],
+    t: ["chat_media_autoload_v65"],
 }
-
 for path, tokens in checks.items():
     data = read(path)
     for token in tokens:
         if token not in data:
-            raise SystemExit(
-                f"Chat media autoload v6.5 verification failed in {path.name}: {token}"
-            )
+            raise SystemExit(f"Chat media autoload v6.5 verification failed in {path.name}: {token}")
 
-# Guard the normal getHistory parser before later chat-media layout patches run.
-# The history-specific guard remains useful even with the wider v7.1 response
-# boundary because it can reject an unsupported message before any partial UI
-# mutation occurs.
+# Protect history before the later layout patches mutate the same parser.
 v69 = Path(__file__).resolve().with_name("patch_history_parser_guard_v69.py")
 if not v69.exists():
     raise SystemExit(f"Missing guarded history parser patch: {v69}")
 subprocess.check_call([sys.executable, str(v69), str(root)])
 
-# The workflow invokes v6.4 later. Make that final layout step run the complete
-# transport/UI chain in a deterministic order:
-#   v6.4 -> v6.6 (DC retry -> v7.0 native preview) -> v7.1 resilience.
-# v7.1 is deliberately last because it restores the stripped-photo fallback,
-# enforces RichEdit block boundaries for photo/video cards, and adds the broad
-# response parser exception boundary.
+# The normal workflow calls v6.4 last. Extend that runner-local script so the
+# complete final chain is deterministic:
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
-if not v64.exists():
-    raise SystemExit(f"Missing future v6.4 chat media patch: {v64}")
-if not v66.exists():
-    raise SystemExit(f"Missing v6.6 media-DC retry patch: {v66}")
-if not v71.exists():
-    raise SystemExit(f"Missing v7.1 chat/media resilience patch: {v71}")
+v72 = Path(__file__).resolve().with_name("patch_dialog_rows_v72.py")
+for label, path in (("v6.4", v64), ("v6.6", v66), ("v7.1", v71), ("v7.2", v72)):
+    if not path.exists():
+        raise SystemExit(f"Missing {label} patch: {path}")
 
 chain_marker = "# chat_media_dc_retry_v66_chain"
 v64_text = v64.read_text(encoding="utf-8")
@@ -125,11 +105,18 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_dialog_rows_v72.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
 print(
-    "Applied chat media autoload v6.5: all enabled image modes request server "
-    "previews; history uses the v6.9 guard; the final v6.4 step is chained through "
-    "v6.6/v7.0 and then v7.1 resilience."
+    "Applied chat media autoload v6.5: image autoload is enabled, history uses "
+    "v6.9, and the final v6.4 runner is chained through v6.6/v7.0, v7.1 "
+    "media/parser resilience, and v7.2 blank-dialog-row cleanup."
 )
