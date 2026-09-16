@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import subprocess
 import sys
 
 if len(sys.argv) != 2:
@@ -22,10 +23,18 @@ def write(path, data):
     path.write_text(data, encoding="latin-1", newline="\r\n")
 
 
+def apply_preview_v70():
+    v70 = Path(__file__).resolve().with_name("patch_chat_media_preview_v70.py")
+    if not v70.exists():
+        raise SystemExit(f"Missing chat media preview v7.0 patch: {v70}")
+    subprocess.check_call([sys.executable, str(v70), str(root)])
+
+
 if "chat_media_full_photo_v64" not in read(t):
     raise SystemExit("Chat full-photo v6.4 was not found. Run patch_chat_media_layout_v64.py first.")
 if "chat_media_dc_retry_v66" in read(t):
     print("Chat media DC retry v6.6 already applied.")
+    apply_preview_v70()
     raise SystemExit(0)
 
 # helpers.cpp: pass the actual connection selected by Telegacy into the full
@@ -173,3 +182,8 @@ print(
     "Applied chat media DC retry v6.6: full chat photos now follow Telegacy's "
     "FILE_MIGRATE media-DC retry path instead of stalling the serial image queue."
 )
+
+# v7.0 deliberately supersedes the v6.4 full-photo interceptor after v6.6 has
+# finished patching it. This ordering lets the older patch remain verifiable while
+# the final executable uses the proven native Media preview transport.
+apply_preview_v70()
