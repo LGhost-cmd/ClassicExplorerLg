@@ -26,10 +26,8 @@ def write(path, data):
 
 
 # Keep chat image autoload enabled for every non-zero image policy. The later
-# v6.4 interceptor handles these requests with the custom serial full-photo
-# loader; we deliberately do NOT restore Telegacy 1.0.4's native get_photo
-# request path here because runs #70/#72 showed a repeatable memcpy crash while
-# opening history-heavy chats.
+# chat-media patches provide a server preview while retaining a stripped-image
+# fallback so a failed/migrated preview can never leave a featureless blank card.
 if "chat_media_autoload_v65" in read(t):
     print("Chat media autoload v6.5 already applied.")
     raise SystemExit(0)
@@ -82,26 +80,29 @@ for path, tokens in checks.items():
             )
 
 # Guard the normal getHistory parser before later chat-media layout patches run.
-# The crash reproduced in runs #70/#72/#74 occurs while parsing the decompressed
-# history page, before the image downloader is reached. v6.9 reuses the already
-# installed length-aware Media message envelope and SEH wrapper so an unsupported
-# modern Telegram message aborts that page safely instead of reading past the RPC
-# buffer in read_le()/memcpy.
+# The history-specific guard remains useful even with the wider v7.1 response
+# boundary because it can reject an unsupported message before any partial UI
+# mutation occurs.
 v69 = Path(__file__).resolve().with_name("patch_history_parser_guard_v69.py")
 if not v69.exists():
     raise SystemExit(f"Missing guarded history parser patch: {v69}")
 subprocess.check_call([sys.executable, str(v69), str(root)])
 
-# The workflow invokes v6.4 later. Append only v6.6 to that runner-local helper
-# file. v6.7/v6.8 are intentionally NOT chained: switching chat photos back to
-# the legacy native get_photo implementation caused a repeatable memcpy access
-# violation on chat open. v6.4 + v6.6 remains the active photo-loading path.
+# The workflow invokes v6.4 later. Make that final layout step run the complete
+# transport/UI chain in a deterministic order:
+#   v6.4 -> v6.6 (DC retry -> v7.0 native preview) -> v7.1 resilience.
+# v7.1 is deliberately last because it restores the stripped-photo fallback,
+# enforces RichEdit block boundaries for photo/video cards, and adds the broad
+# response parser exception boundary.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
+v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
 if not v64.exists():
     raise SystemExit(f"Missing future v6.4 chat media patch: {v64}")
 if not v66.exists():
     raise SystemExit(f"Missing v6.6 media-DC retry patch: {v66}")
+if not v71.exists():
+    raise SystemExit(f"Missing v7.1 chat/media resilience patch: {v71}")
 
 chain_marker = "# chat_media_dc_retry_v66_chain"
 v64_text = v64.read_text(encoding="utf-8")
@@ -117,12 +118,18 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
 print(
-    "Applied chat media autoload v6.5 in stable mode: ordinary chat photos request "
-    "server images whenever image loading is enabled; normal history is protected "
-    "by v6.9; v6.4 is chained only through v6.6. The crashing native v6.7/v6.8 "
-    "path remains disabled."
+    "Applied chat media autoload v6.5: all enabled image modes request server "
+    "previews; history uses the v6.9 guard; the final v6.4 step is chained through "
+    "v6.6/v7.0 and then v7.1 resilience."
 )
