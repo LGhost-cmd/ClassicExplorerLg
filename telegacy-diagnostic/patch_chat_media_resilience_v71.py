@@ -7,10 +7,11 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1]).resolve()
 m = root / "src" / "message.cpp"
+h = root / "src" / "helpers.cpp"
 r = root / "src" / "response.cpp"
 t = root / "src" / "telegacy.cpp"
 
-for p in (m, r, t):
+for p in (m, h, r, t):
     if not p.exists():
         raise SystemExit(f"Missing expected Telegacy file: {p}")
 
@@ -29,11 +30,10 @@ if "chat_media_resilience_v71" in read(m):
 
 # ---------------------------------------------------------------------------
 # 1) Never leave an ordinary photo as a featureless grey loading rectangle.
-# v7.0 intentionally disabled Telegram's stripped JPEG while waiting for the
-# server preview. On slow/failed/migrated preview requests that placeholder can
-# remain forever. Keep the stripped image as a visual fallback; the normal
-# get_photo()/upload.file request still runs and replaces it with the server
-# preview when it arrives.
+# v7.0 deliberately disabled Telegram's stripped JPEG while waiting for a
+# network preview. That makes any failed/stalled preview look like an empty
+# message. Keep the stripped JPEG as an immediate fallback; it will be replaced
+# by the higher-quality server image when that image arrives.
 # ---------------------------------------------------------------------------
 s = read(m)
 old = "if (size == 'i' && false) { // chat_media_preview_v70: stripped preview is metadata only"
@@ -44,12 +44,10 @@ s = s.replace(old, new, 1)
 
 # ---------------------------------------------------------------------------
 # 2) Treat photo/video OLE objects as real RichEdit blocks.
-# The old layout inferred line boundaries from header/footer/group flags. That
-# is not reliable for channel posts: a video can be inserted while the caret is
-# still on the text line, which makes the bitmap overlap/interrupt the caption.
-# Query RichEdit itself and add a separator only when the caret is not already
-# at the start of its current line. This avoids both overlap and double blank
-# rows.
+# Channel posts do not always follow the same header/footer path as ordinary
+# chats, so relying on those flags can put a video bitmap in the middle of the
+# text line. Ask RichEdit for the real caret line and insert exactly one newline
+# only when needed. This fixes overlap without manufacturing extra blank rows.
 # ---------------------------------------------------------------------------
 anchor = "// chat_media_preview_v70\nstatic HBITMAP media_chat_photo_placeholder()"
 if anchor not in s:
@@ -95,7 +93,6 @@ static int media_chat_ensure_line_start(HWND control) {
 '''
 s = s.replace(anchor, helper + anchor, 1)
 
-# Ordinary photos: enforce a line boundary immediately before the OLE range.
 photo_ctor = "} else if (doc != NULL && read_le(doc, 4) == 0x695150d7 && (read_le(doc + 4, 4) & (1 << 0))) {"
 photo_start = s.find(photo_ctor)
 if photo_start < 0:
@@ -114,7 +111,6 @@ photo = photo.replace(
 )
 s = s[:photo_start] + photo + s[photo_end:]
 
-# Video cards: enforce a line boundary before the generated unified video row.
 video_anchor = (
     "\t\t\tdocument.min = cr_startmsg.cpMin + written;\n\n"
     "\t\t\t// media_chat_video_unified_v56\n"
@@ -133,12 +129,52 @@ s = s.replace(video_anchor, video_replacement, 1)
 write(m, s)
 
 # ---------------------------------------------------------------------------
-# 3) Crash containment around every Telegram response, not only getHistory.
-# The v6.9 guard protects the normal history message loop, but modern Telegram
-# objects can also arrive through updates, channel-difference, nested rpc_result
-# and other response paths. A parser AV there used to terminate the whole app.
-# Keep the legacy parser unchanged as response_handler_unsafe and call it through
-# a tiny SEH boundary. Nested response_handler calls are guarded as well.
+# 3) Ordinary chat photos go back through the v6.4/v6.6 serial full-photo
+# loader rather than v7.0's native legacy get_photo transport.
+#
+# Earlier diagnostic runs had already shown access violations in the native
+# path on modern Telegram file references. v6.6 added correct FILE_MIGRATE/DC
+# retry to the serial loader. v7.0 made native get_photo safer, but switching
+# ordinary photos back to it reintroduced the risky path and, in the supplied
+# run, coincides with stalled previews plus another access violation. Keep the
+# hardened native path for video thumbs/custom emoji, but intercept normal
+# visible photos with the migration-aware serial loader.
+# ---------------------------------------------------------------------------
+s = read(h)
+native_comment = '''    // chat_media_preview_v70: visible chat photos intentionally use the native
+    // get_photo/upload.file transport below, exactly like Media previews. The
+    // old v6.4 full-photo interceptor remains compiled only for compatibility
+    // with already-patched response code, but it is no longer entered here.
+'''
+restored_interceptor = r'''    // chat_media_resilience_v71: normal visible chat photos use the proven
+    // v6.4/v6.6 serial loader. photo_size==3 (video preview), stickers/custom
+    // emoji and ordinary file downloads continue through the native path below.
+    if (
+        !rce &&
+        document &&
+        document->visible &&
+        document->photo_size != 0 &&
+        document->photo_size != 1 &&
+        document->photo_size != 3 &&
+        IMAGELOADPOLICY != 0
+    ) {
+        if (media_chat_full_photo_begin(document, dcInfo))
+            return;
+    }
+
+'''
+if native_comment not in s:
+    raise SystemExit("Could not locate v7.0 native-photo transport marker in helpers.cpp.")
+s = s.replace(native_comment, restored_interceptor, 1)
+write(h, s)
+
+# ---------------------------------------------------------------------------
+# 4) Crash containment around every Telegram response, not only getHistory.
+# v6.9 protects the normal history loop, but modern objects can also arrive via
+# updates, channel differences and nested rpc_result payloads. Put the complete
+# legacy response parser behind a tiny SEH boundary. Recursive response_handler
+# calls go through the same boundary. This converts parser AVs into a rejected
+# packet and releases the lazy-history lock instead of terminating Telegacy.
 # ---------------------------------------------------------------------------
 s = read(r)
 signature = "void response_handler(DCInfo* dcInfo, BYTE* unenc_response, bool acknowledgement, int length) {"
@@ -193,7 +229,6 @@ void response_handler(
             dcInfo ? dcInfo->dc : -1
         );
 
-        // Never leave lazy history permanently locked after a rejected packet.
         InterlockedExchange(&history_request_pending, 0);
     }
 }
@@ -202,7 +237,7 @@ void response_handler(
 s = s.replace(signature, wrapper + unsafe_signature, 1)
 write(r, s)
 
-# Audit marker in telegacy.cpp, useful when inspecting packaged diagnostic source.
+# Audit marker in telegacy.cpp.
 s = read(t)
 marker = "// chat_media_preview_v70"
 if marker not in s:
@@ -216,6 +251,11 @@ checks = {
         "if (size == 'i' && IMAGELOADPOLICY) { // chat_media_resilience_v71",
         "static int media_chat_ensure_line_start(HWND control)",
         "written += media_chat_ensure_line_start(chat);",
+    ],
+    h: [
+        "chat_media_resilience_v71: normal visible chat photos use the proven",
+        "media_chat_full_photo_begin(document, dcInfo)",
+        "document->photo_size != 3",
     ],
     r: [
         "static void response_handler_unsafe(",
@@ -232,8 +272,8 @@ for p, tokens in checks.items():
             raise SystemExit(f"Chat/media resilience v7.1 verification failed in {p.name}: {token}")
 
 print(
-    "Applied chat/media resilience v7.1: stripped photo fallback restored, photo/video "
-    "cards are forced to RichEdit line boundaries, and all Telegram response parsing "
-    "is contained behind an SEH boundary so malformed/unsupported packets cannot "
-    "terminate the client."
+    "Applied chat/media resilience v7.1: stripped photo fallback restored; ordinary "
+    "photos use the migration-aware serial loader; photo/video cards are forced to "
+    "real RichEdit line boundaries; and all Telegram response parsing is contained "
+    "behind an SEH boundary."
 )
