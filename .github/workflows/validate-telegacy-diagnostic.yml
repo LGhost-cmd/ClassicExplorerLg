@@ -1,0 +1,99 @@
+name: Validate Telegacy diagnostic patches
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'telegacy-diagnostic/**'
+      - '.github/workflows/validate-telegacy-diagnostic.yml'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout patch repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone exact Telegacy 1.0.4 source
+        shell: pwsh
+        run: git clone --depth 1 --branch v1.0.4 https://github.com/N3xtery/Telegacy.git telegacy-src
+
+      - name: Copy diagnostic build files
+        shell: pwsh
+        run: |
+          Copy-Item "telegacy-diagnostic\CMakeLists.txt" "telegacy-src\CMakeLists.txt" -Force
+          Copy-Item "telegacy-diagnostic\vcpkg.json" "telegacy-src\vcpkg.json" -Force
+
+      - name: Vendor Nayuki C QR generator
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "telegacy-src\third_party\qrcodegen" | Out-Null
+          $base = "https://raw.githubusercontent.com/nayuki/QR-Code-generator/master/c"
+          Invoke-WebRequest "$base/qrcodegen.h" -OutFile "telegacy-src\third_party\qrcodegen\qrcodegen.h"
+          Invoke-WebRequest "$base/qrcodegen.c" -OutFile "telegacy-src\third_party\qrcodegen\qrcodegen.c"
+
+      - name: Compile-check Python patch scripts
+        shell: pwsh
+        run: |
+          python -m py_compile "telegacy-diagnostic\patch_chat_media_autoload_v65.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_media_resilience_v71.py"
+
+      - name: Apply complete diagnostic patch chain
+        shell: pwsh
+        run: |
+          $patches = @(
+            "patch_telegacy.py",
+            "patch_fast_diagnostics.py",
+            "patch_chat_search_id_fix.py",
+            "patch_search_media.py",
+            "patch_server_search.py",
+            "patch_search_context.py",
+            "patch_ui_media_server.py",
+            "patch_media_gallery_nav.py",
+            "patch_media_page_jump.py",
+            "patch_media_stability_jump.py",
+            "patch_media_direct_photo_parser.py",
+            "patch_media_tabs_av.py",
+            "patch_media_audio_video_fix.py",
+            "patch_media_playback_start_fix.py",
+            "patch_media_links_gallery.py",
+            "patch_profiles_navigation.py",
+            "patch_chat_video_reactions.py",
+            "patch_chat_media_layout.py",
+            "patch_chat_media_layout_v64.py"
+          )
+          foreach ($patch in $patches) {
+            Write-Host "=== Applying $patch ==="
+            python (Join-Path "telegacy-diagnostic" $patch) "telegacy-src"
+            if ($LASTEXITCODE -ne 0) { throw "$patch failed with exit code $LASTEXITCODE" }
+          }
+
+      - name: Verify v7.1 reached generated C++
+        shell: pwsh
+        run: |
+          $message = Get-Content "telegacy-src\src\message.cpp" -Raw
+          $response = Get-Content "telegacy-src\src\response.cpp" -Raw
+          $runtime = Get-Content "telegacy-src\src\telegacy.cpp" -Raw
+          if ($message -notmatch "chat_media_resilience_v71") { throw "v7.1 message marker missing" }
+          if ($message -notmatch "media_chat_ensure_line_start") { throw "v7.1 block-layout helper missing" }
+          if ($message -notmatch "stripped preview is a fallback") { throw "v7.1 stripped fallback missing" }
+          if ($response -notmatch "response_handler_unsafe") { throw "v7.1 response boundary missing" }
+          if ($response -notmatch "response v71 recovered parser exception") { throw "v7.1 crash recovery log missing" }
+          if ($runtime -notmatch "chat_media_resilience_v71") { throw "v7.1 runtime marker missing" }
+
+      - name: Configure Win32 RelWithDebInfo
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_INSTALLATION_ROOT) { throw "VCPKG_INSTALLATION_ROOT is unavailable" }
+          cmake -S telegacy-src -B telegacy-build -A Win32 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x86-windows-static
+
+      - name: Build generated Telegacy
+        shell: pwsh
+        run: cmake --build telegacy-build --config RelWithDebInfo --parallel
