@@ -35,12 +35,11 @@ if pos < 0:
 
 helper = r'''
 // media_inplace_upgrade_v73
-// Replace the existing low-resolution OLE object itself.  Document::min/max can
-// drift by one or more characters when a forwarded header, grouped-media footer
-// or an asynchronously inserted line break is added after the thumbnail.  Using
-// a stale range with replace_in_chat can therefore leave the stripped thumbnail
-// in place and insert the full image beside/below it.  Resolve the actual OLE
-// character from RichEdit and replace exactly one object character.
+// Replace the existing low-resolution OLE object itself. Document::min/max can
+// drift when forwarded headers, grouped-media footers, or asynchronous line
+// separators are inserted after the stripped thumbnail. Resolving the actual
+// RichEdit OLE character prevents the final server image from being appended as
+// a second copy of the same attachment.
 static bool media_chat_upgrade_photo_in_place(
     Document* document,
     HBITMAP decoded
@@ -63,8 +62,6 @@ static bool media_chat_upgrade_photo_in_place(
     int best_cp = -1;
     int best_distance = INT_MAX;
 
-    // Prefer objects inside the owning message. This prevents a grouped album
-    // from accidentally upgrading a neighbouring message's attachment.
     int lower = expected > 8 ? expected - 8 : 0;
     int upper = document->max + 8;
 
@@ -100,11 +97,11 @@ static bool media_chat_upgrade_photo_in_place(
 
     ole->Release();
 
-    // A very distant object is not a trustworthy match. Keeping the blurry
-    // fallback is preferable to creating a duplicate full-size attachment.
+    // Never append a second full-size image when the original OLE cannot be
+    // identified safely. A blurry fallback is preferable to duplicated media.
     if (best_cp < 0 || best_distance > 32) {
         diag_log(
-            "media v73 upgrade skipped: OLE not found expected=%d min=%d max=%d distance=%d",
+            "media v73 upgrade skipped expected=%d min=%d max=%d distance=%d",
             expected,
             document->min,
             document->max,
@@ -117,12 +114,7 @@ static bool media_chat_upgrade_photo_in_place(
     HBITMAP display = card ? card : decoded;
 
     CHARRANGE old_selection = {0};
-    SendMessageW(
-        chat,
-        EM_EXGETSEL,
-        0,
-        (LPARAM)&old_selection
-    );
+    SendMessageW(chat, EM_EXGETSEL, 0, (LPARAM)&old_selection);
 
     SCROLLINFO scroll = {0};
     scroll.cbSize = sizeof(scroll);
@@ -133,7 +125,7 @@ static bool media_chat_upgrade_photo_in_place(
     if (was_drawchat)
         SendMessageW(chat, WM_SETREDRAW, FALSE, 0);
 
-    // One embedded object occupies exactly one RichEdit character (U+FFFC).
+    // Every embedded bitmap occupies exactly one RichEdit object character.
     SendMessageW(chat, EM_SETSEL, best_cp, best_cp + 1);
     SendMessageW(chat, EM_REPLACESEL, FALSE, (LPARAM)L"");
     insert_image(chat, NULL, display);
@@ -144,17 +136,8 @@ static bool media_chat_upgrade_photo_in_place(
     document->min = best_cp;
     document->max = best_cp + 1;
 
-    if (
-        old_selection.cpMin >= 0 &&
-        old_selection.cpMax >= 0
-    ) {
-        SendMessageW(
-            chat,
-            EM_EXSETSEL,
-            0,
-            (LPARAM)&old_selection
-        );
-    }
+    if (old_selection.cpMin >= 0 && old_selection.cpMax >= 0)
+        SendMessageW(chat, EM_EXSETSEL, 0, (LPARAM)&old_selection);
 
     if (was_drawchat) {
         SendMessageW(chat, WM_SETREDRAW, TRUE, 0);
@@ -192,7 +175,6 @@ old = r'''        if (full_bitmap) {
             cr.cpMax = documents[target].max;
             replace_in_chat(NULL, &cr, NULL, full_bitmap, NULL, NULL, NULL);
             DeleteObject(full_bitmap);
-            diag_log("chat full photo replaced target=%d", target);
         } else {'''
 new = r'''        if (full_bitmap) {
             bool replaced = media_chat_upgrade_photo_in_place(
@@ -225,8 +207,7 @@ for token in (
         raise SystemExit(f"v7.3 verification failed: {token}")
 
 print(
-    "Applied media in-place upgrade v7.3: full-resolution photo completion now "
-    "locates and replaces the real RichEdit OLE object. If the object cannot be "
-    "matched safely, the low-resolution fallback is retained instead of inserting "
-    "a duplicate image."
+    "Applied media in-place upgrade v7.3: final photo downloads replace the real "
+    "RichEdit OLE object; an unmatched object keeps the stripped fallback rather "
+    "than appending a duplicate image."
 )
