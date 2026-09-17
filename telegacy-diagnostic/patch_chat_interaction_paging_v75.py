@@ -187,8 +187,9 @@ write(r, s)
 # Photo double-click retry + roomier top controls.
 # ---------------------------------------------------------------------------
 s = read(t)
-video_anchor = "// chat_video_direct_mouse_v59\nbool media_chat_video_handle_chat_mouse("
-if video_anchor not in s:
+video_signature = "bool media_chat_video_handle_chat_mouse("
+video_pos = s.find(video_signature)
+if video_pos < 0:
     raise SystemExit("Could not locate direct video mouse helper insertion point.")
 
 photo_handler = r'''// chat_interaction_paging_v75
@@ -300,7 +301,7 @@ bool media_chat_photo_handle_chat_mouse(
 }
 
 '''
-s = s.replace(video_anchor, photo_handler + video_anchor, 1)
+s = s[:video_pos] + photo_handler + s[video_pos:]
 
 # Clear a pending one-item history skip whenever the user changes chats.
 chat_reset = "no_more_msgs = false;"
