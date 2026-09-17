@@ -81,7 +81,7 @@ v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
 v72 = Path(__file__).resolve().with_name("patch_dialog_rows_v72.py")
 v73 = Path(__file__).resolve().with_name("patch_media_inplace_upgrade_v73.py")
-v74 = Path(__file__).resolve().with_name("patch_chat_scope_sync_v74.py")
+v74 = Path(__file__).resolve().with_name("patch_chat_scope_sync_v74_runner.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -131,7 +131,7 @@ _chat_media_v66_subprocess.check_call(
 _chat_media_v66_subprocess.check_call(
     [
         sys.executable,
-        str(Path(__file__).resolve().with_name("patch_chat_scope_sync_v74.py")),
+        str(Path(__file__).resolve().with_name("patch_chat_scope_sync_v74_runner.py")),
         str(root),
     ]
 )
