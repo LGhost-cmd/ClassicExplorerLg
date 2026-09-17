@@ -12,9 +12,10 @@ if not base.exists():
 
 source = base.read_text(encoding="utf-8")
 
-# The exact whitespace around case 3000 is changed by several earlier UI/search
-# patches. Keep the v7.4 implementation itself intact, but make this one source
-# transformation target the unique call rather than the surrounding case block.
+# Earlier UI/search patches can alter whitespace and neighbouring WM_COMMAND
+# cases around the custom chat-search handler. Rewrite only the v7.4 Python
+# source section that depended on that surrounding text; the generated C++
+# target itself is the unique rebuild_chat_combo_by_name(query) call.
 start_marker = '# Search edit: local filtering in My chats, contacts.search in All chats.\n'
 end_marker = '# Selecting a server result clones it into a stable read-only Peer.'
 start = source.find(start_marker)
@@ -22,7 +23,7 @@ end = source.find(end_marker, start)
 if start < 0 or end < 0:
     raise SystemExit("Could not locate v7.4 search-routing source section.")
 
-replacement = r'''# Search edit: local filtering in My chats, contacts.search in All chats.
+replacement = r"""# Search edit: local filtering in My chats, contacts.search in All chats.
 route_call = "\t\t\trebuild_chat_combo_by_name(query);"
 route_new = r'''\t\t\tif (global_chat_search_mode)
 \t\t\t\tglobal_chat_search_begin(query);
@@ -34,7 +35,7 @@ if s.count(route_call) != 1:
     )
 s = s.replace(route_call, route_new, 1)
 
-'''
+"""
 
 source = source[:start] + replacement + source[end:]
 
