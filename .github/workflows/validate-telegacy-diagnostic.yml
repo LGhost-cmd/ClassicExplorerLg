@@ -46,6 +46,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_media_inplace_upgrade_v73.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74_runner.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -84,6 +85,7 @@ jobs:
           $helpers = Get-Content "telegacy-src\src\helpers.cpp" -Raw
           $response = Get-Content "telegacy-src\src\response.cpp" -Raw
           $runtime = Get-Content "telegacy-src\src\telegacy.cpp" -Raw
+          $procs = Get-Content "telegacy-src\src\procs.cpp" -Raw
           if ($message -notmatch "chat_media_resilience_v71") { throw "v7.1 message marker missing" }
           if ($message -notmatch "media_chat_ensure_line_start") { throw "v7.1 block-layout helper missing" }
           if ($message -notmatch "stripped preview is a fallback") { throw "v7.1 stripped fallback missing" }
@@ -99,6 +101,16 @@ jobs:
           if ($runtime -notmatch "wParam == 3013") { throw "v7.4 periodic sync timer missing" }
           if ($response -notmatch "contacts.found - chat_scope_sync_v74") { throw "v7.4 contacts.found parser missing" }
           if ($response -notmatch "telegacy_request_difference_sync") { throw "v7.4 update recovery missing" }
+          if ($runtime -notmatch "chat_interaction_paging_v75") { throw "v7.5 runtime marker missing" }
+          if ($runtime -notmatch "chat v75 photo double click") { throw "v7.5 photo retry missing" }
+          if ($helpers -notmatch "history_skip_next") { throw "v7.5 history skip state missing" }
+          if ($helpers -notmatch "history_add_offset") { throw "v7.5 getHistory skip offset missing" }
+          if ($response -notmatch "history v75 renderer skipped") { throw "v7.5 renderer skip missing" }
+          if ($response -notmatch "malformed item is not end-of-history") { throw "v7.5 parser-gap recovery missing" }
+          if ($procs -notmatch "chat_history_scroll_guard_v75") { throw "v7.5 scroll-top guard missing" }
+          if ($procs -notmatch "chat_photo_retry_dblclick_proc_v75") { throw "v7.5 direct photo double-click missing" }
+          if ($runtime -notmatch "width - 280") { throw "v7.5 message-search spacing missing" }
+          if ($runtime -notmatch "width - 142") { throw "v7.5 Media-button spacing missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
