@@ -42,6 +42,9 @@ jobs:
         run: |
           python -m py_compile "telegacy-diagnostic\patch_chat_media_autoload_v65.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_media_resilience_v71.py"
+          python -m py_compile "telegacy-diagnostic\patch_dialog_rows_v72.py"
+          python -m py_compile "telegacy-diagnostic\patch_media_inplace_upgrade_v73.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -73,10 +76,11 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "$patch failed with exit code $LASTEXITCODE" }
           }
 
-      - name: Verify v7.1 reached generated C++
+      - name: Verify final Telegacy patch markers
         shell: pwsh
         run: |
           $message = Get-Content "telegacy-src\src\message.cpp" -Raw
+          $helpers = Get-Content "telegacy-src\src\helpers.cpp" -Raw
           $response = Get-Content "telegacy-src\src\response.cpp" -Raw
           $runtime = Get-Content "telegacy-src\src\telegacy.cpp" -Raw
           if ($message -notmatch "chat_media_resilience_v71") { throw "v7.1 message marker missing" }
@@ -84,7 +88,16 @@ jobs:
           if ($message -notmatch "stripped preview is a fallback") { throw "v7.1 stripped fallback missing" }
           if ($response -notmatch "response_handler_unsafe") { throw "v7.1 response boundary missing" }
           if ($response -notmatch "response v71 recovered parser exception") { throw "v7.1 crash recovery log missing" }
-          if ($runtime -notmatch "chat_media_resilience_v71") { throw "v7.1 runtime marker missing" }
+          if ($runtime -notmatch "dialog_rows_v72") { throw "v7.2 dialog cleanup marker missing" }
+          if ($runtime -notmatch "media_inplace_upgrade_v73") { throw "v7.3 media in-place marker missing" }
+          if ($runtime -notmatch "media_chat_upgrade_photo_in_place") { throw "v7.3 OLE upgrade helper missing" }
+          if ($runtime -notmatch "chat_scope_sync_v74") { throw "v7.4 scope/sync marker missing" }
+          if ($runtime -notmatch "contacts.search") { throw "v7.4 global contacts.search path missing" }
+          if ($runtime -notmatch "Мои чаты") { throw "v7.4 My Chats tab missing" }
+          if ($runtime -notmatch "Все чаты") { throw "v7.4 All Chats tab missing" }
+          if ($runtime -notmatch "wParam == 3013") { throw "v7.4 periodic sync timer missing" }
+          if ($response -notmatch "contacts.found - chat_scope_sync_v74") { throw "v7.4 contacts.found parser missing" }
+          if ($response -notmatch "telegacy_request_difference_sync") { throw "v7.4 update recovery missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
