@@ -77,6 +77,43 @@ s = s.replace(timer_anchor, timer_new, 1)
 """
 source = source[:start] + replacement + source[end:]
 
+# Telegacy's source tree is intentionally round-tripped as latin-1. Emit the
+# Russian labels as C++ universal-character names so the generated source stays
+# byte-safe while the compiled wide strings remain proper Unicode.
+write_anchor = "write(t, s)\n\n# ---------------------------------------------------------------------------\n# response.cpp: contacts.Found + missed-update recovery/completion."
+write_replacement = r'''s = s.replace(
+    "Мои чаты",
+    r"\u041c\u043e\u0438 \u0447\u0430\u0442\u044b"
+)
+s = s.replace(
+    "Все чаты",
+    r"\u0412\u0441\u0435 \u0447\u0430\u0442\u044b"
+)
+s = s.replace(
+    "Поиск публичных каналов...",
+    r"\u041f\u043e\u0438\u0441\u043a \u043f\u0443\u0431\u043b\u0438\u0447\u043d\u044b\u0445 \u043a\u0430\u043d\u0430\u043b\u043e\u0432..."
+)
+s = s.replace(
+    "Поиск моих чатов...",
+    r"\u041f\u043e\u0438\u0441\u043a \u043c\u043e\u0438\u0445 \u0447\u0430\u0442\u043e\u0432..."
+)
+write(t, s)
+
+# ---------------------------------------------------------------------------
+# response.cpp: contacts.Found + missed-update recovery/completion.'''
+if write_anchor not in source:
+    raise SystemExit("Could not locate v7.4 telegacy.cpp write boundary.")
+source = source.replace(write_anchor, write_replacement, 1)
+
+# Adjust only the verification tokens to look for the literal universal names
+# now present in the generated ANSI-compatible source.
+source = source.replace(
+    '        "Мои чаты",\n        "Все чаты",',
+    '        r"\\u041c\\u043e\\u0438 \\u0447\\u0430\\u0442\\u044b",\n'
+    '        r"\\u0412\\u0441\\u0435 \\u0447\\u0430\\u0442\\u044b",',
+    1,
+)
+
 old_argv = sys.argv[:]
 namespace = {
     "__name__": "__main__",
