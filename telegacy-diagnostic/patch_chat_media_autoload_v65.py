@@ -75,12 +75,21 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
 v72 = Path(__file__).resolve().with_name("patch_dialog_rows_v72.py")
-for label, path in (("v6.4", v64), ("v6.6", v66), ("v7.1", v71), ("v7.2", v72)):
+v73 = Path(__file__).resolve().with_name("patch_media_inplace_upgrade_v73.py")
+v74 = Path(__file__).resolve().with_name("patch_chat_scope_sync_v74.py")
+for label, path in (
+    ("v6.4", v64),
+    ("v6.6", v66),
+    ("v7.1", v71),
+    ("v7.2", v72),
+    ("v7.3", v73),
+    ("v7.4", v74),
+):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
 
@@ -112,11 +121,26 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_media_inplace_upgrade_v73.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_scope_sync_v74.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
 print(
     "Applied chat media autoload v6.5: image autoload is enabled, history uses "
     "v6.9, and the final v6.4 runner is chained through v6.6/v7.0, v7.1 "
-    "media/parser resilience, and v7.2 blank-dialog-row cleanup."
+    "media/parser resilience, v7.2 dialog cleanup, v7.3 in-place media upgrade, "
+    "and v7.4 My Chats/global search plus periodic update reconciliation."
 )
