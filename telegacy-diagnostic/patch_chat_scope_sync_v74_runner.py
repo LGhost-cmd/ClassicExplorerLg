@@ -36,7 +36,45 @@ if s.count(route_call) != 1:
 s = s.replace(route_call, route_new, 1)
 
 """
+source = source[:start] + replacement + source[end:]
 
+# Media/player patches add their own WM_TIMER branches before v7.4 runs, so the
+# old v7.4 source could no longer match "case WM_TIMER + if (wParam == 0)" as one
+# exact block. Keep the status-bar timer creation, then inject our timer branch
+# immediately after the switch label without making assumptions about existing
+# timer order.
+start_marker = '# Periodic missed-update reconciliation. The existing client already knows how\n'
+end_marker = '# Replace the top-control resize block installed by patch_telegacy.py.'
+start = source.find(start_marker)
+end = source.find(end_marker, start)
+if start < 0 or end < 0:
+    raise SystemExit("Could not locate v7.4 periodic-sync source section.")
+
+replacement = r"""# Periodic missed-update reconciliation. The existing client already knows how
+# to parse updates.getDifference; it simply only did this at startup. Reuse that
+# proven path every 45 seconds and when Telegram says updatesTooLong.
+status_anchor = "\t\thStatus = CreateWindow(STATUSCLASSNAME, NULL, WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, hWnd, NULL, NULL, NULL);"
+if status_anchor not in s:
+    raise SystemExit("Could not locate status-bar creation for sync timer.")
+s = s.replace(
+    status_anchor,
+    status_anchor + "\n\t\tSetTimer(hWnd, 3013, 45000, NULL); // chat_scope_sync_v74",
+    1,
+)
+
+timer_anchor = "\tcase WM_TIMER:"
+timer_new = r'''\tcase WM_TIMER:
+\t\tif (wParam == 3013) {
+\t\t\ttelegacy_request_difference_sync();
+\t\t\tbreak;
+\t\t}'''.replace('\\t', '\t')
+if s.count(timer_anchor) != 1:
+    raise SystemExit(
+        f"Could not locate unique main WM_TIMER switch label; found {s.count(timer_anchor)}."
+    )
+s = s.replace(timer_anchor, timer_new, 1)
+
+"""
 source = source[:start] + replacement + source[end:]
 
 old_argv = sys.argv[:]
