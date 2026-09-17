@@ -45,6 +45,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_dialog_rows_v72.py"
           python -m py_compile "telegacy-diagnostic\patch_media_inplace_upgrade_v73.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74_runner.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -93,8 +94,8 @@ jobs:
           if ($runtime -notmatch "media_chat_upgrade_photo_in_place") { throw "v7.3 OLE upgrade helper missing" }
           if ($runtime -notmatch "chat_scope_sync_v74") { throw "v7.4 scope/sync marker missing" }
           if ($runtime -notmatch "contacts.search") { throw "v7.4 global contacts.search path missing" }
-          if ($runtime -notmatch "Мои чаты") { throw "v7.4 My Chats tab missing" }
-          if ($runtime -notmatch "Все чаты") { throw "v7.4 All Chats tab missing" }
+          if (-not $runtime.Contains('\u041c\u043e\u0438 \u0447\u0430\u0442\u044b')) { throw "v7.4 My Chats tab missing" }
+          if (-not $runtime.Contains('\u0412\u0441\u0435 \u0447\u0430\u0442\u044b')) { throw "v7.4 All Chats tab missing" }
           if ($runtime -notmatch "wParam == 3013") { throw "v7.4 periodic sync timer missing" }
           if ($response -notmatch "contacts.found - chat_scope_sync_v74") { throw "v7.4 contacts.found parser missing" }
           if ($response -notmatch "telegacy_request_difference_sync") { throw "v7.4 update recovery missing" }
