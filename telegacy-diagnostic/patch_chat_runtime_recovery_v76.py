@@ -429,8 +429,10 @@ if (
     "no_more_msgs" not in history_tail or
     "get_history()" not in history_tail
 ):
+    compact_tail = history_tail.replace("\r", "\\r").replace("\n", "\\n")
     raise SystemExit(
-        "History response tail no longer contains the expected EOF/pagination logic."
+        "History response tail no longer contains the expected EOF/pagination logic. "
+        "TAIL=" + compact_tail[:1800]
     )
 
 end_new = r'''\t\tint history_v76_rendered_count =
