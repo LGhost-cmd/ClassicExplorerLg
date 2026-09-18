@@ -75,7 +75,7 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
@@ -84,6 +84,7 @@ v73 = Path(__file__).resolve().with_name("patch_media_inplace_upgrade_v73.py")
 v74 = Path(__file__).resolve().with_name("patch_chat_scope_sync_v74_runner.py")
 v75 = Path(__file__).resolve().with_name("patch_chat_interaction_paging_v75_runner.py")
 v76 = Path(__file__).resolve().with_name("patch_chat_runtime_recovery_v76.py")
+v77 = Path(__file__).resolve().with_name("patch_chat_channel_media_layout_v77.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -93,6 +94,7 @@ for label, path in (
     ("v7.4", v74),
     ("v7.5", v75),
     ("v7.6", v76),
+    ("v7.7", v77),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -153,6 +155,13 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_channel_media_layout_v77.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -162,5 +171,6 @@ print(
     "media/parser resilience, v7.2 dialog cleanup, v7.3 in-place media upgrade, "
     "v7.4 My Chats/global search plus periodic update reconciliation, v7.5 "
     "photo retry/top-bar spacing/history pagination hardening, and v7.6 "
-    "orphan-date/media-queue runtime recovery."
+    "orphan-date/media-queue runtime recovery, and v7.7 search-channel photo "
+    "transport plus OLE-safe media placement."
 )
