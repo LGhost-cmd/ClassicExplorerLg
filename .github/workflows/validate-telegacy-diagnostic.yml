@@ -49,6 +49,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75_runner.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_runtime_recovery_v76.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_channel_media_layout_v77.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -121,6 +122,11 @@ jobs:
           if ($response -notmatch "history v76 page raw=") { throw "v7.6 raw-page pagination missing" }
           if ($response -notmatch "global_chat_search_is_result_peer") { throw "v7.6 search-only channel guard missing" }
           if ($response -notmatch "media_chat_full_photo_handle_rpc_error") { throw "v7.6 media rpc recovery missing" }
+          if ($runtime -notmatch "chat_channel_media_layout_v77") { throw "v7.7 runtime marker missing" }
+          if ($runtime -notmatch "media v77 native replaced OLE") { throw "v7.7 native OLE replacement missing" }
+          if ($helpers -notmatch "!global_chat_search_is_result_peer\(current_peer\)") { throw "v7.7 search-channel native photo route missing" }
+          if ($response -notmatch "media_chat_replace_loaded_bitmap") { throw "v7.7 response media replacement hook missing" }
+          if ($response -notmatch "history v77 skipped empty/footer-only row") { throw "v7.7 footer-only history cleanup missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
