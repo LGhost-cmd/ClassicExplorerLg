@@ -55,6 +55,15 @@ if "extern volatile LONG history_skip_next;" not in s:
         1,
     )
 
+# This declaration is injected near the early media declarations, before the
+# full DCInfo definition in Telegacy's legacy header.
+if "struct DCInfo;" not in s:
+    doc_decl = "struct Document;"
+    if doc_decl in s:
+        s = s.replace(doc_decl, doc_decl + "\nstruct DCInfo; // chat_interaction_paging_v75", 1)
+    else:
+        s = s.replace(anchor, anchor + "\nstruct DCInfo; // chat_interaction_paging_v75", 1)
+
 video_decl = "bool media_chat_video_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);"
 if video_decl not in s:
     raise SystemExit("Could not locate direct video mouse declaration.")
@@ -86,6 +95,33 @@ if "volatile LONG history_skip_next = 0;" not in s:
 get_pos = s.find("void get_history()")
 if get_pos < 0:
     raise SystemExit("Could not locate patched get_history().")
+
+# Reset a parser-gap skip when the active peer changes. Doing this inside
+# get_history() avoids placing an InterlockedExchange expression at global
+# scope (the first textual no_more_msgs=false in telegacy.cpp is a global).
+get_signature = "void get_history() {"
+if "history_last_peer_id_v75" not in s:
+    peer_reset = r'''
+    // chat_interaction_paging_v75: a parser-gap skip belongs only to one peer.
+    static BYTE history_last_peer_id_v75[8] = {0};
+    static bool history_last_peer_valid_v75 = false;
+    if (
+        current_peer &&
+        (
+            !history_last_peer_valid_v75 ||
+            memcmp(history_last_peer_id_v75, current_peer->id, 8) != 0
+        )
+    ) {
+        InterlockedExchange(&history_skip_next, 0);
+        memcpy(history_last_peer_id_v75, current_peer->id, 8);
+        history_last_peer_valid_v75 = true;
+    }
+'''
+    if get_signature not in s:
+        raise SystemExit("Could not locate get_history() opening brace.")
+    s = s.replace(get_signature, get_signature + peer_reset, 1)
+    get_pos = s.find("void get_history()")
+
 add_pos = s.find("// add_offset", get_pos)
 if add_pos < 0:
     raise SystemExit("Could not locate getHistory add_offset field.")
@@ -303,19 +339,10 @@ bool media_chat_photo_handle_chat_mouse(
 '''
 s = s[:video_pos] + photo_handler + s[video_pos:]
 
-# Clear a pending one-item history skip whenever the user changes chats.
-chat_reset = "no_more_msgs = false;"
-chat_reset_pos = s.find(chat_reset)
-if chat_reset_pos < 0:
-    raise SystemExit("Could not locate chat history reset on peer selection.")
-line_end = s.find("\n", chat_reset_pos)
-if line_end < 0:
-    line_end = chat_reset_pos + len(chat_reset)
-else:
-    line_end += 1
-indent_start = s.rfind("\n", 0, chat_reset_pos) + 1
-reset_indent = s[indent_start:chat_reset_pos]
-s = s[:line_end] + reset_indent + "InterlockedExchange(&history_skip_next, 0); // chat_interaction_paging_v75\n" + s[line_end:]
+# Peer-change reset is handled inside get_history() in helpers.cpp. This is
+# deliberate: the first textual no_more_msgs=false in telegacy.cpp is the
+# global variable declaration, so inserting an expression after it would
+# create invalid C++ at global scope.
 
 # First-row spacing: keep the same controls but give every adjacent classic
 # control a real 10-pixel gap. This also slightly increases the chat selector at
@@ -426,11 +453,13 @@ write(p, s)
 checks = {
     h: [
         "history_skip_next",
+        "struct DCInfo;",
         "media_chat_photo_handle_chat_mouse(HWND hWnd",
         "media_chat_full_photo_begin(Document* document, DCInfo* dcInfo)",
     ],
     hp: [
         "history_skip_next = 0",
+        "history_last_peer_id_v75",
         "history v75 skipping server items=%ld",
         "history_add_offset",
     ],
