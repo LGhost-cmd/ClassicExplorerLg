@@ -254,7 +254,8 @@ bool media_chat_replace_loaded_bitmap(
     if (document->photo_size == 3) {
         SendMessageW(chat, EM_SETSEL, best_cp, best_cp + 1);
 
-        CHARFORMAT2W link_format = {0};
+        CHARFORMAT2W link_format;
+        memset(&link_format, 0, sizeof(link_format));
         link_format.cbSize = sizeof(link_format);
         link_format.dwMask = CFM_LINK;
         link_format.dwEffects = CFE_LINK;
