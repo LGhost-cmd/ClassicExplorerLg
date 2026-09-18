@@ -107,7 +107,7 @@ jobs:
           if ($runtime -notmatch "chat v75 photo double click") { throw "v7.5 photo retry missing" }
           if ($helpers -notmatch "history_skip_next") { throw "v7.5 history skip state missing" }
           if ($helpers -notmatch "history_add_offset") { throw "v7.5 getHistory skip offset missing" }
-          if ($response -notmatch "history v75 renderer skipped") { throw "v7.5 renderer skip missing" }
+          if (($response -notmatch "history v75 renderer skipped") -and ($response -notmatch "history v76 skipped dirty render")) { throw "v7.5/v7.6 renderer skip missing" }
           if ($response -notmatch "malformed item is not end-of-history") { throw "v7.5 parser-gap recovery missing" }
           if ($procs -notmatch "chat_history_scroll_guard_v75") { throw "v7.5 scroll-top guard missing" }
           if ($procs -notmatch "chat_photo_retry_dblclick_proc_v75") { throw "v7.5 direct photo double-click missing" }
