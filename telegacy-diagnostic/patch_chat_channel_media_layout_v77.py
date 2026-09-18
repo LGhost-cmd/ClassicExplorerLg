@@ -332,7 +332,7 @@ if end_call < 0:
 replacement = r'''media_chat_replace_loaded_bitmap(
                     &documents[i],
                     hClone
-                )'''
+                );'''
 s = s[:call] + replacement + s[end_call:]
 write(r, s)
 
