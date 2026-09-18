@@ -55,21 +55,11 @@ if "extern volatile LONG history_skip_next;" not in s:
         1,
     )
 
-# This declaration is injected near the early media declarations, before the
-# full DCInfo definition in Telegacy's legacy header.
-if "struct DCInfo;" not in s:
-    doc_decl = "struct Document;"
-    if doc_decl in s:
-        s = s.replace(doc_decl, doc_decl + "\nstruct DCInfo; // chat_interaction_paging_v75", 1)
-    else:
-        s = s.replace(anchor, anchor + "\nstruct DCInfo; // chat_interaction_paging_v75", 1)
-
 video_decl = "bool media_chat_video_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);"
 if video_decl not in s:
     raise SystemExit("Could not locate direct video mouse declaration.")
 
 extra_decls = (
-    "\nbool media_chat_full_photo_begin(Document* document, DCInfo* dcInfo); // chat_interaction_paging_v75"
     "\nbool media_chat_photo_handle_chat_mouse(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam); // chat_interaction_paging_v75"
 )
 if "media_chat_photo_handle_chat_mouse(HWND hWnd" not in s:
@@ -229,6 +219,11 @@ if video_pos < 0:
     raise SystemExit("Could not locate direct video mouse helper insertion point.")
 
 photo_handler = r'''// chat_interaction_paging_v75
+// Local forward declaration: DCInfo is fully defined by the time telelegacy.cpp
+// is compiled, while keeping this prototype out of the early legacy header
+// avoids declaring a not-yet-defined type there.
+bool media_chat_full_photo_begin(Document* document, DCInfo* dcInfo);
+
 // A double click on an ordinary photo card means "retry/upgrade this preview".
 // This is intentionally separate from video handling. Clearing photo_msg_id
 // makes the item eligible for the existing serial loader even if another photo
@@ -453,9 +448,7 @@ write(p, s)
 checks = {
     h: [
         "history_skip_next",
-        "struct DCInfo;",
         "media_chat_photo_handle_chat_mouse(HWND hWnd",
-        "media_chat_full_photo_begin(Document* document, DCInfo* dcInfo)",
     ],
     hp: [
         "history_skip_next = 0",
@@ -470,6 +463,7 @@ checks = {
     ],
     t: [
         "chat_interaction_paging_v75",
+        "media_chat_full_photo_begin(Document* document, DCInfo* dcInfo);",
         "chat v75 photo double click",
         "200, 10, 105, 300",
         "450, 10, width - 460, 300",
