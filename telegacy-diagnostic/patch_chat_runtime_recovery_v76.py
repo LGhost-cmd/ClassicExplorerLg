@@ -403,32 +403,58 @@ s = s.replace(reply_old, reply_new, 1)
 
 # A skipped/duplicate/unsupported item is not end-of-history. Determine EOF from
 # the raw Telegram page length, not from how many objects the old renderer kept.
-end_old = (
-    "\t\tif (messages.size() - messages_count_old < MSGSFETCHCOUNT) no_more_msgs = true;\n"
-    "\t\telse if (SendMessage(chat, EM_GETFIRSTVISIBLELINE, 0, 0) == 0) get_history();"
-)
-end_new = r'''		int history_v76_rendered_count =
-			(int)messages.size() - messages_count_old;
+#
+# Older Media patches reformat this tail while adding viewport preservation.
+# Bound the replacement to the getHistory response case instead of relying on
+# one exact spelling of the old two-line condition.
+history_case_pos = s.find("case 0x3a54685e:")
+if history_case_pos < 0:
+    raise SystemExit("Could not locate messages history response case.")
 
-		no_more_msgs = count < MSGSFETCHCOUNT;
+history_update_pos = s.find("UpdateWindow(chat);", history_case_pos)
+if history_update_pos < 0:
+    raise SystemExit("Could not locate history UpdateWindow(chat) tail.")
 
-		diag_log(
-			"history v76 page raw=%d rendered=%d limit=%d end=%d",
-			count,
-			history_v76_rendered_count,
-			MSGSFETCHCOUNT,
-			no_more_msgs ? 1 : 0
-		);
+history_update_end = s.find("\n", history_update_pos)
+if history_update_end < 0:
+    raise SystemExit("Could not isolate history UpdateWindow(chat) line.")
+history_update_end += 1
 
-		if (
-			!no_more_msgs &&
-			SendMessage(chat, EM_GETFIRSTVISIBLELINE, 0, 0) == 0
-		) {
-			get_history();
-		}'''.replace("\\t", "\t")
-if end_old not in s:
-    raise SystemExit("Could not locate history end-of-page decision.")
-s = s.replace(end_old, end_new, 1)
+history_break_pos = s.find("\n\t\tbreak;", history_update_end)
+if history_break_pos < 0:
+    raise SystemExit("Could not locate history response break after UpdateWindow.")
+
+history_tail = s[history_update_end:history_break_pos]
+if (
+    "no_more_msgs" not in history_tail or
+    "get_history()" not in history_tail
+):
+    raise SystemExit(
+        "History response tail no longer contains the expected EOF/pagination logic."
+    )
+
+end_new = r'''\t\tint history_v76_rendered_count =
+\t\t\t(int)messages.size() - messages_count_old;
+
+\t\tno_more_msgs = count < MSGSFETCHCOUNT;
+
+\t\tdiag_log(
+\t\t\t"history v76 page raw=%d rendered=%d limit=%d end=%d",
+\t\t\tcount,
+\t\t\thistory_v76_rendered_count,
+\t\t\tMSGSFETCHCOUNT,
+\t\t\tno_more_msgs ? 1 : 0
+\t\t);
+
+\t\tif (
+\t\t\t!no_more_msgs &&
+\t\t\tSendMessage(chat, EM_GETFIRSTVISIBLELINE, 0, 0) == 0
+\t\t) {
+\t\t\tget_history();
+\t\t}
+'''.replace("\\t", "\t")
+
+s = s[:history_update_end] + end_new + s[history_break_pos:]
 
 # Search-only public channels are not stored in peers[]. The old channel
 # difference parser searches only peers[], so requesting a difference for a
