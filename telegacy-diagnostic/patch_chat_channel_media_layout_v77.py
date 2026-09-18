@@ -343,19 +343,26 @@ write(r, s)
 # service messages (which have visible body text) intact.
 # ---------------------------------------------------------------------------
 s = read(r)
-old_orphan = r'''            !history_v76_renderer_bad &&
-            safe_media &&
-            safe_media_length > 0 &&
-            (int)messages.size() > history_v76_messages_before &&
-            (int)documents.size() == history_v76_documents_before
-'''
-new_orphan = r'''            !history_v76_renderer_bad &&
-            (int)messages.size() > history_v76_messages_before &&
-            (int)documents.size() == history_v76_documents_before
-'''
-if old_orphan not in s:
-    raise SystemExit("Could not locate v7.6 orphan-row predicate.")
-s = s.replace(old_orphan, new_orphan, 1)
+orphan_pos = s.find("bool history_v76_orphan_media = false;")
+if orphan_pos < 0:
+    raise SystemExit("Could not locate v7.6 orphan-row state.")
+
+orphan_end = s.find("if (history_v76_renderer_bad || history_v76_orphan_media)", orphan_pos)
+if orphan_end < 0:
+    raise SystemExit("Could not locate v7.6 orphan-row decision.")
+
+orphan_block = s[orphan_pos:orphan_end]
+for condition in ("safe_media &&", "safe_media_length > 0 &&"):
+    pos = orphan_block.find(condition)
+    if pos < 0:
+        raise SystemExit(f"Could not locate v7.6 orphan condition: {condition}")
+    line_start = orphan_block.rfind("\n", 0, pos) + 1
+    line_end = orphan_block.find("\n", pos)
+    if line_end < 0:
+        raise SystemExit(f"Could not isolate v7.6 orphan condition: {condition}")
+    orphan_block = orphan_block[:line_start] + orphan_block[line_end + 1:]
+
+s = s[:orphan_pos] + orphan_block + s[orphan_end:]
 
 log_old = '"history v76 skipped dirty render item=%d id=%d safe=%d rendered=%d orphan_media=%d exception=0x%08X"'
 log_new = '"history v77 skipped empty/footer-only row item=%d id=%d safe=%d rendered=%d empty_row=%d exception=0x%08X"'
