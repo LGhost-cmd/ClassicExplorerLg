@@ -492,25 +492,31 @@ if channel_old not in s:
     raise SystemExit("Could not locate initial channel difference block.")
 s = s.replace(channel_old, channel_new, 1)
 
-# Release a full-photo serial request on ordinary rpc errors.  FILE_MIGRATE_*
+# Release a full-photo serial request on ordinary rpc errors. FILE_MIGRATE_*
 # must continue into the existing 303 branch so v6.6 can switch DCs.
-rpc_anchor = (
-    "\t\tint error_code = read_le(unenc_response + 4, 4);\n"
-    "\t\twchar_t error_message[50];\n"
-    "\t\tread_string(unenc_response + 8, error_message);\n"
+rpc_case = s.find("case 0x2144ca19:")
+if rpc_case < 0:
+    raise SystemExit("Could not locate rpc_error case.")
+
+rpc_read = s.find("read_string(unenc_response + 8", rpc_case)
+if rpc_read < 0:
+    raise SystemExit("Could not locate rpc_error message decode.")
+
+rpc_read_end = s.find("\n", rpc_read)
+if rpc_read_end < 0:
+    raise SystemExit("Could not isolate rpc_error message decode line.")
+rpc_read_end += 1
+
+rpc_guard = (
+    '\t\tif (media_chat_full_photo_handle_rpc_error(\n'
+    '\t\t\tlast_rpcresult_msgid,\n'
+    '\t\t\terror_code,\n'
+    '\t\t\terror_message\n'
+    '\t\t)) {\n'
+    '\t\t\tbreak;\n'
+    '\t\t}\n'
 )
-if rpc_anchor not in s:
-    raise SystemExit("Could not locate rpc_error header.")
-rpc_new = rpc_anchor + (
-    "\t\tif (media_chat_full_photo_handle_rpc_error(\n"
-    "\t\t\tlast_rpcresult_msgid,\n"
-    "\t\t\terror_code,\n"
-    "\t\t\terror_message\n"
-    "\t\t)) {\n"
-    "\t\t\tbreak;\n"
-    "\t\t}\n"
-)
-s = s.replace(rpc_anchor, rpc_new, 1)
+s = s[:rpc_read_end] + rpc_guard + s[rpc_read_end:]
 
 write(r, s)
 
