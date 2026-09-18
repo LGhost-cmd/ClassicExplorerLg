@@ -48,6 +48,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_scope_sync_v74_runner.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75_runner.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_runtime_recovery_v76.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -113,6 +114,13 @@ jobs:
           if ($runtime -notmatch "width - 320") { throw "v7.5 message-search spacing missing" }
           if ($runtime -notmatch "width - 295") { throw "v7.5 search-status spacing missing" }
           if ($runtime -notmatch "width - 125") { throw "v7.5 Media-button spacing missing" }
+          if ($runtime -notmatch "chat_runtime_recovery_v76") { throw "v7.6 runtime marker missing" }
+          if ($runtime -notmatch "photo click preempting active transfer") { throw "v7.6 force-photo retry missing" }
+          if ($runtime -notmatch "peer switch cancelled stale full-photo transfer") { throw "v7.6 peer-switch media reset missing" }
+          if ($response -notmatch "history_v76_rollback_front_render") { throw "v7.6 history rollback missing" }
+          if ($response -notmatch "history v76 page raw=") { throw "v7.6 raw-page pagination missing" }
+          if ($response -notmatch "global_chat_search_is_result_peer") { throw "v7.6 search-only channel guard missing" }
+          if ($response -notmatch "media_chat_full_photo_handle_rpc_error") { throw "v7.6 media rpc recovery missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
