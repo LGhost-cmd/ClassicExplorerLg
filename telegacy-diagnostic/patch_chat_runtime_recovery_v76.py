@@ -425,17 +425,32 @@ if history_break_pos < 0:
     raise SystemExit("Could not locate history response break after UpdateWindow.")
 
 history_tail = s[history_update_end:history_break_pos]
-if (
-    "no_more_msgs" not in history_tail or
-    "get_history()" not in history_tail
-):
-    compact_tail = history_tail.replace("\r", "\\r").replace("\n", "\\n")
-    raise SystemExit(
-        "History response tail no longer contains the expected EOF/pagination logic. "
-        "TAIL=" + compact_tail[:1800]
-    )
 
-end_new = r'''\t\tint history_v76_rendered_count =
+if (
+    "if (count < MSGSFETCHCOUNT)" in history_tail and
+    "no_more_msgs = true;" in history_tail and
+    "no_more_msgs = false;" in history_tail
+):
+    # A previous navigation patch has already corrected the important semantic:
+    # EOF is based on the raw Telegram vector count, not on de-duplicated/
+    # rendered messages. Keep that proven code and add only a v7.6 audit log.
+    pagination_audit = (
+        '\t\tdiag_log("history v76 page raw=%d rendered=%d limit=%d", '
+        'count, (int)messages.size() - messages_count_old, MSGSFETCHCOUNT);\n'
+    )
+    s = s[:history_update_end] + pagination_audit + s[history_update_end:]
+else:
+    if (
+        "no_more_msgs" not in history_tail or
+        "get_history()" not in history_tail
+    ):
+        compact_tail = history_tail.replace("\r", "\\r").replace("\n", "\\n")
+        raise SystemExit(
+            "History response tail no longer contains recognized EOF/pagination logic. "
+            "TAIL=" + compact_tail[:1800]
+        )
+
+    end_new = r'''\t\tint history_v76_rendered_count =
 \t\t\t(int)messages.size() - messages_count_old;
 
 \t\tno_more_msgs = count < MSGSFETCHCOUNT;
@@ -456,7 +471,7 @@ end_new = r'''\t\tint history_v76_rendered_count =
 \t\t}
 '''.replace("\\t", "\t")
 
-s = s[:history_update_end] + end_new + s[history_break_pos:]
+    s = s[:history_update_end] + end_new + s[history_break_pos:]
 
 # Search-only public channels are not stored in peers[]. The old channel
 # difference parser searches only peers[], so requesting a difference for a
