@@ -50,6 +50,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_interaction_paging_v75_runner.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_runtime_recovery_v76.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_channel_media_layout_v77.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_photo_click_download_v78.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -127,6 +128,11 @@ jobs:
           if ($helpers -notmatch "!global_chat_search_is_result_peer\(current_peer\)") { throw "v7.7 search-channel native photo route missing" }
           if ($response -notmatch "media_chat_replace_loaded_bitmap") { throw "v7.7 response media replacement hook missing" }
           if ($response -notmatch "history v77 skipped empty/footer-only row") { throw "v7.7 footer-only history cleanup missing" }
+          if ($runtime -notmatch "chat_photo_click_download_v78") { throw "v7.8 runtime marker missing" }
+          if ($runtime -notmatch "media_chat_full_photo_save_and_open") { throw "v7.8 persistent photo download missing" }
+          if ($runtime -notmatch "chat v78 photo click") { throw "v7.8 click handler missing" }
+          if ($response -notmatch "media_chat_full_photo_retry_migrated") { throw "v7.8 FILE_MIGRATE click recovery missing" }
+          if ($procs -notmatch "chat_photo_click_download_proc_v78") { throw "v7.8 direct photo mouse interception missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
