@@ -409,7 +409,12 @@ s = s[:video_pos] + user_helper + s[video_pos:]
 photo_sig = "bool media_chat_photo_handle_chat_mouse("
 ps, pe = function_range(s, photo_sig)
 
-photo_handler = r'''bool media_chat_photo_handle_chat_mouse(
+photo_handler = r'''static bool media_chat_full_photo_user_action(
+    Document* document,
+    bool save_and_open
+);
+
+bool media_chat_photo_handle_chat_mouse(
     HWND hWnd,
     UINT msg,
     WPARAM,
