@@ -117,7 +117,7 @@ jobs:
           if ($runtime -notmatch "width - 295") { throw "v7.5 search-status spacing missing" }
           if ($runtime -notmatch "width - 125") { throw "v7.5 Media-button spacing missing" }
           if ($runtime -notmatch "chat_runtime_recovery_v76") { throw "v7.6 runtime marker missing" }
-          if ($runtime -notmatch "photo click preempting active transfer") { throw "v7.6 force-photo retry missing" }
+          if (($runtime -notmatch "photo click preempting active transfer") -and ($runtime -notmatch "chat v78 photo action preempting background transfer")) { throw "v7.6/v7.8 force-photo retry missing" }
           if ($runtime -notmatch "peer switch cancelled stale full-photo transfer") { throw "v7.6 peer-switch media reset missing" }
           if ($response -notmatch "history_v76_rollback_front_render") { throw "v7.6 history rollback missing" }
           if ($response -notmatch "history v76 page raw=") { throw "v7.6 raw-page pagination missing" }
