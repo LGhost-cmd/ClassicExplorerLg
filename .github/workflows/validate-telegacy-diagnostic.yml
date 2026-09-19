@@ -131,7 +131,7 @@ jobs:
           if ($response -notmatch "history v77 skipped empty/footer-only row") { throw "v7.7 footer-only history cleanup missing" }
           if ($runtime -notmatch "chat_photo_click_download_v78") { throw "v7.8 runtime marker missing" }
           if ($runtime -notmatch "media_chat_full_photo_save_and_open") { throw "v7.8 persistent photo download missing" }
-          if ($runtime -notmatch "chat v78 photo click") { throw "v7.8 click handler missing" }
+          if (($runtime -notmatch "chat v78 photo click") -and ($runtime -notmatch "chat v79 photo click")) { throw "v7.8/v7.9 click handler missing" }
           if ($response -notmatch "media_chat_full_photo_retry_migrated") { throw "v7.8 FILE_MIGRATE click recovery missing" }
           if ($procs -notmatch "chat_photo_click_download_proc_v78") { throw "v7.8 direct photo mouse interception missing" }
           if ($runtime -notmatch "chat_global_peer_photo_hit_v79") { throw "v7.9 runtime marker missing" }
