@@ -52,6 +52,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_channel_media_layout_v77.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_photo_click_download_v78.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_global_peer_photo_hit_v79.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_media_ole_rebind_v80.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -138,6 +139,10 @@ jobs:
           if ($runtime -notmatch "chat v79 global search peer_channels=") { throw "v7.9 global peer parser missing" }
           if ($runtime -notmatch "chat v79 OLE click mapped") { throw "v7.9 OLE click mapping missing" }
           if ($response -notmatch "chat v79 invalid global peer released history pending") { throw "v7.9 invalid-peer recovery missing" }
+          if ($runtime -notmatch "chat_media_ole_rebind_v80") { throw "v8.0 runtime marker missing" }
+          if ($runtime -notmatch "media_chat_v80_is_bitmap_ole") { throw "v8.0 bitmap OLE classifier missing" }
+          if ($runtime -notmatch "chat v80 OLE ordinal rebind") { throw "v8.0 ordinal rebind missing" }
+          if ($runtime -notmatch "chat v80 photo OLE mapped") { throw "v8.0 photo mapping log missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
