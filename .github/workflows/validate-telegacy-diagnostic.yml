@@ -137,7 +137,7 @@ jobs:
           if ($procs -notmatch "chat_photo_click_download_proc_v78") { throw "v7.8 direct photo mouse interception missing" }
           if ($runtime -notmatch "chat_global_peer_photo_hit_v79") { throw "v7.9 runtime marker missing" }
           if ($runtime -notmatch "chat v79 global search peer_channels=") { throw "v7.9 global peer parser missing" }
-          if ($runtime -notmatch "chat v79 OLE click mapped") { throw "v7.9 OLE click mapping missing" }
+          if (($runtime -notmatch "chat v79 OLE click mapped") -and ($runtime -notmatch "chat v80 photo OLE mapped")) { throw "v7.9/v8.0 OLE click mapping missing" }
           if ($response -notmatch "chat v79 invalid global peer released history pending") { throw "v7.9 invalid-peer recovery missing" }
           if ($runtime -notmatch "chat_media_ole_rebind_v80") { throw "v8.0 runtime marker missing" }
           if ($runtime -notmatch "media_chat_v80_is_bitmap_ole") { throw "v8.0 bitmap OLE classifier missing" }
