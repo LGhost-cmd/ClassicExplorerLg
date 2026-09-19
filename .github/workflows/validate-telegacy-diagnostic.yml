@@ -106,7 +106,7 @@ jobs:
           if ($response -notmatch "contacts.found - chat_scope_sync_v74") { throw "v7.4 contacts.found parser missing" }
           if ($response -notmatch "telegacy_request_difference_sync") { throw "v7.4 update recovery missing" }
           if ($runtime -notmatch "chat_interaction_paging_v75") { throw "v7.5 runtime marker missing" }
-          if ($runtime -notmatch "chat v75 photo double click") { throw "v7.5 photo retry missing" }
+          if (($runtime -notmatch "chat v75 photo double click") -and ($runtime -notmatch "chat v78 photo click")) { throw "v7.5/v7.8 photo click path missing" }
           if ($helpers -notmatch "history_skip_next") { throw "v7.5 history skip state missing" }
           if ($helpers -notmatch "history_add_offset") { throw "v7.5 getHistory skip offset missing" }
           if (($response -notmatch "history v75 renderer skipped") -and ($response -notmatch "history v76 skipped dirty render") -and ($response -notmatch "history v77 skipped empty/footer-only row")) { throw "v7.5/v7.6/v7.7 renderer skip missing" }
