@@ -39,7 +39,7 @@ find_library(TOMCRYPT_LIBRARY NAMES tomcrypt libtomcrypt REQUIRED)
 find_path(TOMMATH_INCLUDE_DIR NAMES tommath.h REQUIRED)
 find_library(TOMMATH_LIBRARY NAMES tommath libtommath REQUIRED)
 
-find_package(miniz CONFIG REQUIRED)
+find_path(MINIZ_INCLUDE_DIR NAMES miniz.h REQUIRED)
 find_path(RLOTTIE_INCLUDE_DIR NAMES rlottie.h REQUIRED)
 
 if(NOT VCPKG_INSTALLED_DIR OR NOT VCPKG_TARGET_TRIPLET)
@@ -70,6 +70,7 @@ find_library(JPEG_LIBRARY NAMES jpeg libjpeg REQUIRED)
 target_include_directories(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_INCLUDE_DIR}"
     "${TOMMATH_INCLUDE_DIR}"
+    "${MINIZ_INCLUDE_DIR}"
     "${WEBP_INCLUDE_DIR}"
     "${JPEG_INCLUDE_DIR}"
     "${RLOTTIE_INCLUDE_DIR}"
@@ -100,7 +101,6 @@ set_property(TARGET telegacy-diagnostic PROPERTY
 target_link_libraries(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_LIBRARY}"
     "${TOMMATH_LIBRARY}"
-    miniz::miniz
     optimized "${RLOTTIE_LIBRARY_RELEASE}"
     debug "${RLOTTIE_LIBRARY_DEBUG}"
     "${WEBP_LIBRARY}"
