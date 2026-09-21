@@ -169,13 +169,13 @@ s = s[:rs] + reset_func + s[re:]
 
 bs, be = function_range(s, "bool media_chat_full_photo_begin(")
 begin_func = s[bs:be]
-active_guard = "    if (media_chat_full_photo_active)\n        return true;\n"
-if active_guard not in begin_func:
-    raise SystemExit("Could not locate full-photo active guard.")
+target_init_anchor = "    int file_ref_len = tlstr_len("
+if target_init_anchor not in begin_func:
+    raise SystemExit("Could not locate full-photo file_reference initialization.")
 begin_func = begin_func.replace(
-    active_guard,
-    active_guard +
-    "\n    media_chat_full_photo_target_v86 = document;\n",
+    target_init_anchor,
+    "    media_chat_full_photo_target_v86 = document;\n\n" +
+    target_init_anchor,
     1,
 )
 s = s[:bs] + begin_func + s[be:]
