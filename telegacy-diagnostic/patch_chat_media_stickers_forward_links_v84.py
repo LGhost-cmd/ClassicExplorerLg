@@ -762,142 +762,139 @@ s = s[:ts] + timer_func + s[te:]
 hs, he = function_range(s := read(hp), "int msgfwd_addname(")
 fwd_func = s[hs:he]
 
-old_tail = r'''    if (name) {
-        written_info += riched_write(chat, name);
-        int deleted_wchars = 0;
-        for (int j = 0; j < wcslen(name); j++) j = emoji_adder(j, name, pos_init, 13, chat, &deleted_wchars);
-        written_info -= deleted_wchars;
-        SendMessage(chat, EM_SETSEL, pos_init + written_info, pos_init + written_info);
-    }
-    if (name_allocated) free(name);
-    return written_info;'''
+name_block_start = fwd_func.find("if (name) {")
+if name_block_start < 0:
+    raise SystemExit("Could not locate msgfwd_addname name-render block.")
 
-new_tail = r'''    if (name) {
-        written_info += riched_write(chat, name);
-        int deleted_wchars = 0;
-        for (int j = 0; j < wcslen(name); j++)
-            j = emoji_adder(
-                j,
-                name,
-                pos_init,
-                13,
-                chat,
-                &deleted_wchars
-            );
+return_pos = fwd_func.find("return written_info;", name_block_start)
+if return_pos < 0:
+    raise SystemExit("Could not locate msgfwd_addname return.")
 
-        written_info -= deleted_wchars;
+return_end = return_pos + len("return written_info;")
 
-        SendMessage(
-            chat,
-            EM_SETSEL,
-            pos_init + written_info,
-            pos_init + written_info
-        );
+new_tail = r'''if (name) {
+		written_info += riched_write(chat, name);
+		int deleted_wchars = 0;
+		for (int j = 0; j < wcslen(name); j++)
+			j = emoji_adder(
+				j,
+				name,
+				pos_init,
+				13,
+				chat,
+				&deleted_wchars
+			);
 
-        if (
-            (flags & (1 << 0)) &&
-            written_info > 0
-        ) {
-            unsigned int peer_ctor =
-                read_le(
-                    msgfwd + 8,
-                    4
-                );
+		written_info -= deleted_wchars;
 
-            int peer_type = 2;
+		SendMessage(
+			chat,
+			EM_SETSEL,
+			pos_init + written_info,
+			pos_init + written_info
+		);
 
-            if (peer_ctor == 0x59511722)
-                peer_type = 0;
-            else if (peer_ctor == 0x36c6019a)
-                peer_type = 1;
+		if (
+			(flags & (1 << 0)) &&
+			written_info > 0
+		) {
+			unsigned int peer_ctor =
+				read_le(
+					msgfwd + 8,
+					4
+				);
 
-            unsigned __int64 peer_id =
-                (unsigned __int64)read_le(
-                    msgfwd + 12,
-                    8
-                );
+			int peer_type = 2;
 
-            if (peer_id != 0) {
-                wchar_t target[64] = {0};
+			if (peer_ctor == 0x59511722)
+				peer_type = 0;
+			else if (peer_ctor == 0x36c6019a)
+				peer_type = 1;
 
-                _snwprintf(
-                    target,
-                    ARRAYSIZE(target) - 1,
-                    L"telegacy-peer:%d:%016I64X",
-                    peer_type,
-                    peer_id
-                );
+			unsigned __int64 peer_id =
+				(unsigned __int64)read_le(
+					msgfwd + 12,
+					8
+				);
 
-                TEXTRANGE forward_link;
-                forward_link.chrg.cpMin =
-                    pos_init;
-                forward_link.chrg.cpMax =
-                    pos_init + written_info;
-                forward_link.lpstrText =
-                    _wcsdup(target);
+			if (peer_id != 0) {
+				wchar_t target[64] = {0};
 
-                if (forward_link.lpstrText) {
-                    links.push_back(
-                        forward_link
-                    );
+				_snwprintf(
+					target,
+					ARRAYSIZE(target) - 1,
+					L"telegacy-peer:%d:%016I64X",
+					peer_type,
+					peer_id
+				);
 
-                    CHARFORMAT2W cf = {0};
-                    cf.cbSize = sizeof(cf);
-                    cf.dwMask =
-                        CFM_LINK |
-                        CFM_UNDERLINE |
-                        CFM_COLOR;
-                    cf.dwEffects =
-                        CFE_LINK |
-                        CFE_UNDERLINE;
-                    cf.crTextColor =
-                        RGB(0, 0, 255);
+				TEXTRANGE forward_link;
+				forward_link.chrg.cpMin =
+					pos_init;
+				forward_link.chrg.cpMax =
+					pos_init + written_info;
+				forward_link.lpstrText =
+					_wcsdup(target);
 
-                    SendMessageW(
-                        chat,
-                        EM_SETSEL,
-                        forward_link.chrg.cpMin,
-                        forward_link.chrg.cpMax
-                    );
+				if (forward_link.lpstrText) {
+					links.push_back(
+						forward_link
+					);
 
-                    SendMessageW(
-                        chat,
-                        EM_SETCHARFORMAT,
-                        SCF_SELECTION,
-                        (LPARAM)&cf
-                    );
+					CHARFORMAT2W cf = {0};
+					cf.cbSize = sizeof(cf);
+					cf.dwMask =
+						CFM_LINK |
+						CFM_UNDERLINE |
+						CFM_COLOR;
+					cf.dwEffects =
+						CFE_LINK |
+						CFE_UNDERLINE;
+					cf.crTextColor =
+						RGB(0, 0, 255);
 
-                    SendMessageW(
-                        chat,
-                        EM_SETSEL,
-                        pos_init + written_info,
-                        pos_init + written_info
-                    );
+					SendMessageW(
+						chat,
+						EM_SETSEL,
+						forward_link.chrg.cpMin,
+						forward_link.chrg.cpMax
+					);
 
-                    diag_log(
-                        "chat v84 forward origin link type=%d id=%016I64X range=%d..%d",
-                        peer_type,
-                        peer_id,
-                        forward_link.chrg.cpMin,
-                        forward_link.chrg.cpMax
-                    );
-                }
-            }
-        }
-    }
+					SendMessageW(
+						chat,
+						EM_SETCHARFORMAT,
+						SCF_SELECTION,
+						(LPARAM)&cf
+					);
 
-    if (name_allocated)
-        free(name);
+					SendMessageW(
+						chat,
+						EM_SETSEL,
+						pos_init + written_info,
+						pos_init + written_info
+					);
 
-    return written_info;'''
+					diag_log(
+						"chat v84 forward origin link type=%d id=%016I64X range=%d..%d",
+						peer_type,
+						peer_id,
+						forward_link.chrg.cpMin,
+						forward_link.chrg.cpMax
+					);
+				}
+			}
+		}
+	}
 
-if old_tail not in fwd_func:
-    raise SystemExit("Could not locate msgfwd_addname rendering tail.")
+	if (name_allocated)
+		free(name);
 
-fwd_func = fwd_func.replace(
-    old_tail,
-    new_tail,
-    1
+	return written_info;'''
+
+fwd_func = (
+    fwd_func[:name_block_start] +
+    new_tail +
+    fwd_func[return_end:]
 )
 
 s = s[:hs] + fwd_func + s[he:]
