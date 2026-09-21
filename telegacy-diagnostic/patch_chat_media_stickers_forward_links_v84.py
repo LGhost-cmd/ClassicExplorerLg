@@ -918,6 +918,8 @@ if search_state_anchor not in s:
     raise SystemExit("Could not locate global search state for forward navigation.")
 
 forward_state = r'''
+static void global_chat_search_begin(const wchar_t* query);
+
 static bool chat_v84_forward_search_pending = false;
 static unsigned __int64 chat_v84_forward_target_id = 0;
 static int chat_v84_forward_target_type = -1;
