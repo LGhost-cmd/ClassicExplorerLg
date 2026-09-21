@@ -259,6 +259,34 @@ static bool media_chat_sticker_ensure_anchor_ole_v85(
         return true;
     }
 
+    int cp =
+        document->min;
+
+    wchar_t marker[2] = {0};
+
+    TEXTRANGE marker_range;
+    marker_range.chrg.cpMin = cp;
+    marker_range.chrg.cpMax = cp + 1;
+    marker_range.lpstrText = marker;
+
+    SendMessageW(
+        chat,
+        EM_GETTEXTRANGE,
+        0,
+        (LPARAM)&marker_range
+    );
+
+    // Never delete arbitrary message text if a stale Document range drifted.
+    // The no-thumbnail sticker branch reserved exactly U+FE0F here.
+    if (marker[0] != 0xFE0F) {
+        diag_log(
+            "chat v85 sticker anchor refused non-placeholder cp=%d char=0x%04X",
+            cp,
+            (unsigned int)marker[0]
+        );
+        return false;
+    }
+
     HBITMAP anchor =
         media_chat_sticker_make_anchor_bitmap_v85();
 
@@ -294,8 +322,6 @@ static bool media_chat_sticker_ensure_anchor_ole_v85(
             0
         );
     }
-
-    int cp = document->min;
 
     SendMessageW(
         chat,
@@ -980,6 +1006,7 @@ checks = [
     "chat_sticker_layout_stability_v85",
     "media_chat_sticker_ensure_anchor_ole_v85",
     "chat v85 sticker anchor OLE inserted",
+    "chat v85 sticker anchor refused non-placeholder",
     "MulDiv(\n        180,",
     "EM_GETRECT",
     "IntersectRect(",
