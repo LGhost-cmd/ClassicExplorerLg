@@ -715,23 +715,39 @@ static bool media_chat_rebind_clicked_photo_v86(
 '''
 s = s[:photo_handler_pos] + click_helper + s[photo_handler_pos:]
 
-phs, phe = function_range(s, "bool media_chat_photo_handle_chat_mouse(")
-photo_handler = s[phs:phe]
-action_anchor = "        bool save_and_open =\n            msg == WM_LBUTTONDBLCLK;"
-if action_anchor not in photo_handler:
-    raise SystemExit("Could not locate single/double photo action branch.")
-photo_handler = photo_handler.replace(
-    action_anchor,
-    r'''        media_chat_rebind_clicked_photo_v86(
+photo_handler_pos = s.find(
+    "bool media_chat_photo_handle_chat_mouse("
+)
+
+if photo_handler_pos < 0:
+    raise SystemExit("Could not locate final photo mouse handler.")
+
+action_call = s.find(
+    "media_chat_full_photo_user_action(",
+    photo_handler_pos
+)
+
+if action_call < 0:
+    raise SystemExit("Could not locate final photo user-action call.")
+
+action_line = s.rfind(
+    "\n",
+    photo_handler_pos,
+    action_call
+) + 1
+
+photo_rebind_call = r'''        media_chat_rebind_clicked_photo_v86(
             document,
             point
         );
 
-        bool save_and_open =
-            msg == WM_LBUTTONDBLCLK;''',
-    1,
+'''
+
+s = (
+    s[:action_line] +
+    photo_rebind_call +
+    s[action_line:]
 )
-s = s[:phs] + photo_handler + s[phe:]
 
 # ---------------------------------------------------------------------------
 # C) Static WebP stickers are committed into the RichEdit OLE itself. They no
