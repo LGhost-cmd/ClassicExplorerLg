@@ -55,6 +55,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_media_ole_rebind_v80.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_photo_open_sticker_viewport_v81.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_animated_stickers_v82.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_animated_sticker_stability_v83.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -157,6 +158,9 @@ jobs:
           if ($runtime -notmatch "media_chat_sticker_timer_proc") { throw "v8.2 animation timer missing" }
           if ($message -notmatch "media_chat_animated_sticker_queue") { throw "v8.2 message sticker queue missing" }
           if ($response -notmatch "media_chat_animated_sticker_download_complete") { throw "v8.2 sticker completion hook missing" }
+          if ($runtime -notmatch "chat_animated_sticker_stability_v83") { throw "v8.3 runtime marker missing" }
+          if ($runtime -notmatch "chat v83 sticker cache ready path=") { throw "v8.3 safe sticker cache missing" }
+          if ($runtime -notmatch "media_chat_sticker_timer_proc_unsafe") { throw "v8.3 sticker timer crash boundary missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
