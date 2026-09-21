@@ -58,6 +58,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_animated_sticker_stability_v83.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_media_stickers_forward_links_v84.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_sticker_layout_stability_v85.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_viewport_media_stability_v86.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -173,6 +174,13 @@ jobs:
           if ($runtime -notmatch "chat v85 sticker anchor OLE inserted") { throw "v8.5 sticker anchor diagnostic missing" }
           if ($runtime -notmatch "bool webm_claimed = false") { throw "v8.5 WebM serialization missing" }
           if ($runtime -notmatch "chat v85 recovered sticker window exception") { throw "v8.5 sticker window crash boundary missing" }
+          if ($runtime -notmatch "chat_viewport_media_stability_v86") { throw "v8.6 runtime marker missing" }
+          if ($runtime -notmatch "media_chat_full_photo_target_v86") { throw "v8.6 exact photo target missing" }
+          if ($runtime -notmatch "chat v86 full photo OLE replaced") { throw "v8.6 full photo replacement missing" }
+          if ($runtime -notmatch "media_chat_sticker_commit_webp_v86") { throw "v8.6 static sticker OLE commit missing" }
+          if ($runtime -notmatch "media_chat_sticker_scroll_quiet_until_v86") { throw "v8.6 sticker scroll quiet period missing" }
+          if ($helpers -notmatch "history v86 restored anchor") { throw "v8.6 history viewport restore missing" }
+          if ($procs -notmatch "media_chat_sticker_scroll_event_v86") { throw "v8.6 sticker scroll hook missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
