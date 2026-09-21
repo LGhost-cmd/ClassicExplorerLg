@@ -167,6 +167,10 @@ if insert_at < 0:
     raise SystemExit("Could not locate sticker loader insertion point.")
 
 anchor_helpers = r'''
+static int media_chat_sticker_find_ole_cp(
+    Document* document
+);
+
 static HBITMAP media_chat_sticker_make_anchor_bitmap_v85() {
     int width =
         media_chat_sticker_card_width();
