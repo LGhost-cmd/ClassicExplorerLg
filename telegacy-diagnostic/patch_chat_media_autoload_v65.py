@@ -75,7 +75,7 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
@@ -90,6 +90,7 @@ v79 = Path(__file__).resolve().with_name("patch_chat_global_peer_photo_hit_v79.p
 v80 = Path(__file__).resolve().with_name("patch_chat_media_ole_rebind_v80.py")
 v81 = Path(__file__).resolve().with_name("patch_chat_photo_open_sticker_viewport_v81.py")
 v82 = Path(__file__).resolve().with_name("patch_chat_animated_stickers_v82.py")
+v83 = Path(__file__).resolve().with_name("patch_chat_animated_sticker_stability_v83.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -105,6 +106,7 @@ for label, path in (
     ("v8.0", v80),
     ("v8.1", v81),
     ("v8.2", v82),
+    ("v8.3", v83),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -207,6 +209,13 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_animated_sticker_stability_v83.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -221,6 +230,7 @@ print(
     "upgrade plus double-click persistent download/open, and v7.9 exact global-peer "
     "identity parsing plus OLE-based photo hit testing, v8.0 CF_BITMAP "
     "OLE-to-Document rebinding for stale media ranges, and v8.1 deterministic "
-    "double-click open, pixel-stable OLE replacement, sticker thumbnails, and "
-    "v8.2 inline looping TGS/WebM sticker animation."
+    "double-click open, pixel-stable OLE replacement, sticker thumbnails, "
+    "v8.2 inline looping TGS/WebM sticker animation, and v8.3 safe cache paths "
+    "plus animation crash containment."
 )
