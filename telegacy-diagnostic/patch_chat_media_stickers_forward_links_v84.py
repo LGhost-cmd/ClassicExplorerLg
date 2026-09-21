@@ -752,6 +752,9 @@ timer_func = timer_func.replace(
 
 s = s[:ts] + timer_func + s[te:]
 
+# Persist the media/sticker runtime changes before switching to helpers.cpp.
+write(t, s)
+
 
 # ---------------------------------------------------------------------------
 # C) Forwarded-from names become in-app links.
