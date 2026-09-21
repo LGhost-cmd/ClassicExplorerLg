@@ -301,7 +301,7 @@ new_decode = r'''int media_payload_size =
                             : 1
                     );
 
-                HBITMAP hClone = NULL;
+                hClone = NULL;
 
                 if (
                     media_payload_size > 0 &&
