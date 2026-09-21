@@ -66,6 +66,7 @@ target_compile_definitions(telegacy-diagnostic PRIVATE
     LTM_DESC
     _CRT_SECURE_NO_WARNINGS
     _CRT_NON_CONFORMING_SWPRINTFS
+    RLOTTIE_BUILD=0
 )
 
 target_compile_options(telegacy-diagnostic PRIVATE
