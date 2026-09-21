@@ -836,16 +836,25 @@ action_call = s.find(
 if action_call < 0:
     raise SystemExit("Could not locate final photo user-action call.")
 
+started_pos = s.rfind(
+    "bool started",
+    photo_handler_pos,
+    action_call
+)
+
+if started_pos < 0:
+    raise SystemExit("Could not locate final photo action assignment.")
+
 action_line = s.rfind(
     "\n",
     photo_handler_pos,
-    action_call
+    started_pos
 ) + 1
 
-photo_rebind_call = r'''        media_chat_rebind_clicked_photo_v86(
-            document,
-            point
-        );
+photo_rebind_call = r'''    media_chat_rebind_clicked_photo_v86(
+        document,
+        point
+    );
 
 '''
 
