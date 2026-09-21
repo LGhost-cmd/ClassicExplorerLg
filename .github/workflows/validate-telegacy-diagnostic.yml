@@ -130,7 +130,7 @@ jobs:
           if ($response -notmatch "global_chat_search_is_result_peer") { throw "v7.6 search-only channel guard missing" }
           if ($response -notmatch "media_chat_full_photo_handle_rpc_error") { throw "v7.6 media rpc recovery missing" }
           if ($runtime -notmatch "chat_channel_media_layout_v77") { throw "v7.7 runtime marker missing" }
-          if ($runtime -notmatch "media v77 native replaced OLE") { throw "v7.7 native OLE replacement missing" }
+          if (($runtime -notmatch "media v77 native replaced OLE") -and ($runtime -notmatch "chat v84 native replaced OLE")) { throw "v7.7/v8.4 native OLE replacement missing" }
           if (($helpers -notmatch "!global_chat_search_is_result_peer\(current_peer\)") -and ($helpers -notmatch "Automatic chat media uses the native Telegram thumb request below")) { throw "v7.7/v8.1 native photo route missing" }
           if ($response -notmatch "media_chat_replace_loaded_bitmap") { throw "v7.7 response media replacement hook missing" }
           if ($response -notmatch "history v77 skipped empty/footer-only row") { throw "v7.7 footer-only history cleanup missing" }
