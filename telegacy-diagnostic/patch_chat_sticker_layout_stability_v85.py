@@ -436,6 +436,42 @@ s = s[:as_] + activate + s[ae:]
 # Also animate only one WebM player at a time and probe its playback position at
 # 250ms instead of hammering MFPlay every 33ms.
 # ---------------------------------------------------------------------------
+timer_helper_pos = s.find(
+    "static VOID CALLBACK media_chat_sticker_timer_proc_unsafe("
+)
+
+if timer_helper_pos < 0:
+    raise SystemExit("Could not locate v8.3 sticker timer for v8.5.")
+
+video_release_helper = r'''
+static void media_chat_sticker_release_video_v85(
+    ChatAnimatedSticker* sticker
+) {
+    if (!sticker || !sticker->video)
+        return;
+
+    sticker->video->Pause();
+    sticker->video->Stop();
+    sticker->video->Shutdown();
+    sticker->video->Release();
+    sticker->video = NULL;
+    sticker->video_paused_for_visibility = true;
+    sticker->next_frame_tick = 0;
+
+    diag_log(
+        "chat v85 released inactive WebM player path=%ls",
+        sticker->path
+    );
+}
+
+'''
+
+s = (
+    s[:timer_helper_pos] +
+    video_release_helper +
+    s[timer_helper_pos:]
+)
+
 ts, te = function_range(
     s,
     "static VOID CALLBACK media_chat_sticker_timer_proc_unsafe("
@@ -505,12 +541,14 @@ new_timer = r'''static VOID CALLBACK media_chat_sticker_timer_proc_unsafe(
                 );
             }
 
-            if (
-                sticker->video &&
-                !sticker->video_paused_for_visibility
-            ) {
-                sticker->video->Pause();
-                sticker->video_paused_for_visibility = true;
+            if (sticker->kind == 2) {
+                media_chat_sticker_release_video_v85(
+                    sticker
+                );
+            } else {
+                media_chat_sticker_release_video_v85(
+                    sticker
+                );
             }
 
             sticker->visible = false;
@@ -584,7 +622,11 @@ new_timer = r'''static VOID CALLBACK media_chat_sticker_timer_proc_unsafe(
                     SW_HIDE
                 );
 
-            if (
+            if (sticker->kind == 2) {
+                media_chat_sticker_release_video_v85(
+                    sticker
+                );
+            } else if (
                 sticker->video &&
                 !sticker->video_paused_for_visibility
             ) {
@@ -812,13 +854,9 @@ new_destroy = r'''static void media_chat_sticker_destroy(
         );
     }
 
-    if (sticker->video) {
-        sticker->video->Pause();
-        sticker->video->Stop();
-        sticker->video->Shutdown();
-        sticker->video->Release();
-        sticker->video = NULL;
-    }
+    media_chat_sticker_release_video_v85(
+        sticker
+    );
 
     if (sticker->window) {
         DestroyWindow(
@@ -947,6 +985,8 @@ checks = [
     "IntersectRect(",
     "SetWindowRgn(",
     "bool webm_claimed = false",
+    "media_chat_sticker_release_video_v85",
+    "chat v85 released inactive WebM player",
     "now + 250",
     "media_chat_sticker_window_proc_unsafe",
     "chat v85 recovered sticker window exception",
