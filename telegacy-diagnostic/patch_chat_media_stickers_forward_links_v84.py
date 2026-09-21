@@ -1135,75 +1135,74 @@ s = s.replace(
 )
 
 
-# Extend contacts.Found parser to users.
-search_end_anchor = r'''    diag_log(
-        "chat v74 global search parsed channels=%d",
-        (int)global_chat_search_results.size()
-    );
+# Extend the final v7.9 contacts.Found path without replacing its exact channel
+# parser. v7.9 deliberately reconstructs channels by stable peerChannel IDs and
+# does not walk modern object tails. For a forwarded PERSON we only need the one
+# exact User object requested by the private navigation target, so scan for that
+# ctor/id pair and let legacy set_peer_info decode just that single object.
+gs, ge = function_range(
+    s,
+    "bool global_chat_search_handle_found("
+)
 
-    global_chat_search_rebuild_combo();
-    return true;'''
+search_func = s[gs:ge]
 
-if search_end_anchor not in s:
-    raise SystemExit("Could not locate end of global_chat_search_handle_found.")
+final_rebuild = search_func.rfind(
+    "global_chat_search_rebuild_combo();"
+)
+if final_rebuild < 0:
+    raise SystemExit(
+        "Could not locate final global search combo rebuild."
+    )
 
-search_end_new = r'''    // contacts.Found ends with Vector<User>. v7.4 deliberately ignored
-    // it because All Chats initially targeted channels only; forwarded-origin
-    // navigation needs public/user results as well.
-    if (
-        offset + 8 <= length &&
-        read_le(
-            response + offset,
-            4
-        ) == 0x1cb5c415
+final_return = search_func.find(
+    "return true;",
+    final_rebuild
+)
+if final_return < 0:
+    raise SystemExit(
+        "Could not locate final global search return."
+    )
+
+forward_finish = r'''if (
+        chat_v84_forward_search_pending &&
+        chat_v84_forward_target_type == 0
     ) {
-        int user_count =
-            read_le(
-                response + offset + 4,
-                4
-            );
-
-        offset += 8;
-
-        if (
-            user_count >= 0 &&
-            user_count <= 2000
+        for (
+            int probe = 4;
+            probe + 28 <= length;
+            probe += 4
         ) {
-            for (
-                int i = 0;
-                i < user_count &&
-                offset + 4 <= length;
-                i++
+            if (
+                read_le(
+                    response + probe,
+                    4
+                ) != 0x4b46c37e ||
+                (unsigned __int64)read_le(
+                    response + probe + 12,
+                    8
+                ) !=
+                    chat_v84_forward_target_id
             ) {
-                unsigned int ctor =
-                    read_le(
-                        response + offset,
-                        4
-                    );
+                continue;
+            }
 
-                if (ctor != 0x4b46c37e)
-                    break;
+            Peer peer = {0};
+            peer.type = 0;
 
-                Peer peer = {0};
-                peer.type = 0;
+            int consumed =
+                set_peer_info(
+                    response + probe,
+                    &peer,
+                    false
+                );
 
-                int consumed =
-                    set_peer_info(
-                        response + offset,
-                        &peer,
-                        false
-                    );
-
-                if (
-                    consumed <= 0 ||
-                    consumed > length - offset
-                ) {
-                    global_chat_search_free_result(
-                        &peer
-                    );
-                    break;
-                }
-
+            if (
+                consumed > 0 &&
+                consumed <= length - probe &&
+                peer.name &&
+                peer.name[0]
+            ) {
                 peer.full = true;
                 peer.perm.cansendmsg = false;
                 peer.perm.cansendmed = false;
@@ -1215,21 +1214,21 @@ search_end_new = r'''    // contacts.Found ends with Vector<User>. v7.4 delibera
                 peer.reaction_list = NULL;
                 peer.chat_users = NULL;
 
-                if (
-                    peer.name &&
-                    peer.name[0]
-                ) {
-                    global_chat_search_results.push_back(
-                        peer
-                    );
-                } else {
-                    global_chat_search_free_result(
-                        &peer
-                    );
-                }
+                global_chat_search_results.push_back(
+                    peer
+                );
 
-                offset += consumed;
+                diag_log(
+                    "chat v84 global forward user parsed id=%016I64X",
+                    chat_v84_forward_target_id
+                );
+            } else {
+                global_chat_search_free_result(
+                    &peer
+                );
             }
+
+            break;
         }
     }
 
@@ -1296,13 +1295,15 @@ search_end_new = r'''    // contacts.Found ends with Vector<User>. v7.4 delibera
         }
     }
 
-    return true;'''
+    '''
 
-s = s.replace(
-    search_end_anchor,
-    search_end_new,
-    1
+search_func = (
+    search_func[:final_rebuild] +
+    forward_finish +
+    search_func[final_return:]
 )
+
+s = s[:gs] + search_func + s[ge:]
 
 
 # Handle private telelegacy-peer target in the existing EN_LINK path.
