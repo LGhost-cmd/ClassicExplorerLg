@@ -571,10 +571,6 @@ new_timer = r'''static VOID CALLBACK media_chat_sticker_timer_proc_unsafe(
                 media_chat_sticker_release_video_v85(
                     sticker
                 );
-            } else {
-                media_chat_sticker_release_video_v85(
-                    sticker
-                );
             }
 
             sticker->visible = false;
@@ -784,12 +780,10 @@ new_timer = r'''static VOID CALLBACK media_chat_sticker_timer_proc_unsafe(
                             now + 250;
                     }
                 }
-            } else if (
-                sticker->video &&
-                !sticker->video_paused_for_visibility
-            ) {
-                sticker->video->Pause();
-                sticker->video_paused_for_visibility = true;
+            } else {
+                media_chat_sticker_release_video_v85(
+                    sticker
+                );
             }
         }
     }
