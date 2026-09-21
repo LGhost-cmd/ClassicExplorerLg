@@ -566,7 +566,11 @@ s = s[:rs] + reset_func + s[re_:]
 # Avoid redundant single-click transfers once the OLE already contains the full
 # image. A double click may still re-download the exact JPEG for persistence,
 # but it skips repainting the already-full card.
-us, ue = function_range(s, "static bool media_chat_full_photo_user_action(")
+user_action_definition = """static bool media_chat_full_photo_user_action(
+    Document* document,
+    bool save_and_open
+) {"""
+us, ue = function_range(s, user_action_definition)
 user_func = s[us:ue]
 
 validation_end = user_func.find("\n\n    bool same_active")
