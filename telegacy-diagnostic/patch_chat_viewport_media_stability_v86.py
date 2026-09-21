@@ -258,6 +258,112 @@ new_target = r'''    int target = -1;
 upload_func = upload_func[:target_start] + new_target + upload_func[target_log:]
 s = s[:us] + upload_func + s[ue:]
 
+# v8.1 remembered "already full" by Telegram document id/access_hash only.
+# The same image may occur in several messages, so one occurrence could mark
+# another pixelated occurrence as already loaded. Track the actual deque
+# Document address plus its identity instead.
+photo_state_anchor = (
+    "static std::vector<unsigned __int64> "
+    "media_chat_v81_loaded_full_photos;"
+)
+
+if photo_state_anchor not in s:
+    raise SystemExit(
+        "Could not locate v8.1 loaded-photo state."
+    )
+
+instance_state = r'''
+struct MediaChatFullInstanceV86 {
+    const Document* document;
+    BYTE id[8];
+    BYTE access_hash[8];
+};
+
+static std::vector<MediaChatFullInstanceV86>
+    media_chat_v86_loaded_full_instances;
+'''
+
+s = s.replace(
+    photo_state_anchor,
+    photo_state_anchor + instance_state,
+    1
+)
+
+fis, fie = function_range(
+    s,
+    "static bool media_chat_v81_photo_is_full("
+)
+
+is_full_func = r'''static bool media_chat_v81_photo_is_full(
+    const Document* document
+) {
+    if (!document)
+        return false;
+
+    for (
+        int i = 0;
+        i < (int)media_chat_v86_loaded_full_instances.size();
+        i++
+    ) {
+        const MediaChatFullInstanceV86& item =
+            media_chat_v86_loaded_full_instances[i];
+
+        if (
+            item.document == document &&
+            memcmp(item.id, document->id, 8) == 0 &&
+            memcmp(
+                item.access_hash,
+                document->access_hash,
+                8
+            ) == 0
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}'''
+
+s = s[:fis] + is_full_func + s[fie:]
+
+fms, fme = function_range(
+    s,
+    "static void media_chat_v81_mark_photo_full("
+)
+
+mark_full_func = r'''static void media_chat_v81_mark_photo_full(
+    const Document* document
+) {
+    if (
+        !document ||
+        media_chat_v81_photo_is_full(document)
+    ) {
+        return;
+    }
+
+    MediaChatFullInstanceV86 item;
+    item.document = document;
+
+    memcpy(item.id, document->id, 8);
+    memcpy(
+        item.access_hash,
+        document->access_hash,
+        8
+    );
+
+    media_chat_v86_loaded_full_instances.push_back(
+        item
+    );
+
+    diag_log(
+        "chat v86 marked exact photo instance full ptr=%p min=%d",
+        document,
+        document->min
+    );
+}'''
+
+s = s[:fms] + mark_full_func + s[fme:]
+
 # ---------------------------------------------------------------------------
 # B) Exact full-photo OLE replacement. Never use SB_BOTTOM while an async photo
 # finishes: preserve the pixel scroll position instead.
@@ -1199,6 +1305,32 @@ timer_func = timer_func.replace(
 )
 
 s = s[:ts] + timer_func + s[te:]
+
+clear_s, clear_e = function_range(
+    s,
+    "void media_chat_animated_sticker_clear()"
+)
+
+clear_func = s[clear_s:clear_e]
+clear_brace = clear_func.find("{")
+
+if clear_brace < 0:
+    raise SystemExit(
+        "Could not locate animated-sticker clear brace."
+    )
+
+if (
+    "media_chat_v86_loaded_full_instances.clear();"
+    not in clear_func
+):
+    clear_func = (
+        clear_func[:clear_brace + 1] +
+        "\n    media_chat_v86_loaded_full_instances.clear();\n" +
+        clear_func[clear_brace + 1:]
+    )
+
+s = s[:clear_s] + clear_func + s[clear_e:]
+
 write(t, s)
 
 # WndProcChat tells overlay runtime about all user-driven scrolling before the
@@ -1497,6 +1629,8 @@ checks = {
     t: [
         "chat_viewport_media_stability_v86",
         "media_chat_full_photo_target_v86",
+        "media_chat_v86_loaded_full_instances",
+        "chat v86 marked exact photo instance full",
         "chat v86 full photo OLE replaced",
         "chat v86 photo click rebound",
         "media_chat_sticker_commit_webp_v86",
