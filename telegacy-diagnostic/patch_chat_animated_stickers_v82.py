@@ -1005,6 +1005,86 @@ static void media_chat_sticker_loop_video(
     }
 }
 
+static int media_chat_sticker_find_ole_cp(
+    Document* document
+) {
+    if (!chat || !document)
+        return -1;
+
+    IRichEditOle* ole = NULL;
+
+    SendMessageW(
+        chat,
+        EM_GETOLEINTERFACE,
+        0,
+        (LPARAM)&ole
+    );
+
+    if (!ole)
+        return -1;
+
+    int best_cp = -1;
+    int best_distance = INT_MAX;
+
+    LONG object_count =
+        ole->GetObjectCount();
+
+    for (
+        LONG i = 0;
+        i < object_count;
+        i++
+    ) {
+        REOBJECT reo = {0};
+        reo.cbStruct = sizeof(reo);
+
+        if (
+            FAILED(
+                ole->GetObject(
+                    i,
+                    &reo,
+                    REO_GETOBJ_NO_INTERFACES
+                )
+            )
+        ) {
+            continue;
+        }
+
+        int cp =
+            (int)reo.cp;
+
+        int distance =
+            cp >= document->min
+                ? cp - document->min
+                : document->min - cp;
+
+        bool large_object =
+            reo.sizel.cx > 1000 ||
+            reo.sizel.cy > 1000;
+
+        // Exact/adjacent OLE is safe regardless of reported HIMETRIC size.
+        // A slightly stale Document range is accepted only for a large media
+        // object, never for a neighboring 15px custom emoji.
+        if (
+            distance > 1 &&
+            (
+                distance > 16 ||
+                !large_object
+            )
+        ) {
+            continue;
+        }
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best_cp = cp;
+        }
+    }
+
+    ole->Release();
+
+    return best_cp;
+}
+
 static VOID CALLBACK media_chat_sticker_timer_proc(
     HWND,
     UINT,
@@ -1054,6 +1134,22 @@ static VOID CALLBACK media_chat_sticker_timer_proc(
             continue;
         }
 
+        int sticker_cp =
+            media_chat_sticker_find_ole_cp(
+                document
+            );
+
+        if (sticker_cp < 0) {
+            if (sticker->window)
+                ShowWindow(
+                    sticker->window,
+                    SW_HIDE
+                );
+
+            sticker->visible = false;
+            continue;
+        }
+
         POINTL origin = {0, 0};
 
         LRESULT result =
@@ -1061,7 +1157,7 @@ static VOID CALLBACK media_chat_sticker_timer_proc(
                 chat,
                 EM_POSFROMCHAR,
                 (WPARAM)&origin,
-                (LPARAM)document->min
+                (LPARAM)sticker_cp
             );
 
         int width =
