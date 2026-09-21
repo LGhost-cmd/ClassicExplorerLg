@@ -40,7 +40,8 @@ find_path(TOMMATH_INCLUDE_DIR NAMES tommath.h REQUIRED)
 find_library(TOMMATH_LIBRARY NAMES tommath libtommath REQUIRED)
 
 find_package(miniz CONFIG REQUIRED)
-find_package(rlottie CONFIG REQUIRED)
+find_path(RLOTTIE_INCLUDE_DIR NAMES rlottie.h REQUIRED)
+find_library(RLOTTIE_LIBRARY NAMES rlottie REQUIRED)
 
 find_path(WEBP_INCLUDE_DIR NAMES webp/decode.h REQUIRED)
 find_library(WEBP_LIBRARY NAMES webp libwebp REQUIRED)
@@ -54,6 +55,7 @@ target_include_directories(telegacy-diagnostic PRIVATE
     "${TOMMATH_INCLUDE_DIR}"
     "${WEBP_INCLUDE_DIR}"
     "${JPEG_INCLUDE_DIR}"
+    "${RLOTTIE_INCLUDE_DIR}"
 )
 
 target_compile_definitions(telegacy-diagnostic PRIVATE
@@ -81,7 +83,7 @@ target_link_libraries(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_LIBRARY}"
     "${TOMMATH_LIBRARY}"
     miniz::miniz
-    rlottie::rlottie
+    "${RLOTTIE_LIBRARY}"
     "${WEBP_LIBRARY}"
     "${JPEG_LIBRARY}"
 
