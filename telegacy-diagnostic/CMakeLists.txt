@@ -41,7 +41,24 @@ find_library(TOMMATH_LIBRARY NAMES tommath libtommath REQUIRED)
 
 find_package(miniz CONFIG REQUIRED)
 find_path(RLOTTIE_INCLUDE_DIR NAMES rlottie.h REQUIRED)
-find_library(RLOTTIE_LIBRARY NAMES rlottie REQUIRED)
+
+if(NOT VCPKG_INSTALLED_DIR OR NOT VCPKG_TARGET_TRIPLET)
+    message(FATAL_ERROR "rlottie requires the vcpkg-installed target tree.")
+endif()
+
+find_library(RLOTTIE_LIBRARY_RELEASE
+    NAMES rlottie
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib"
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+find_library(RLOTTIE_LIBRARY_DEBUG
+    NAMES rlottie
+    PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib"
+    NO_DEFAULT_PATH
+    REQUIRED
+)
 
 find_path(WEBP_INCLUDE_DIR NAMES webp/decode.h REQUIRED)
 find_library(WEBP_LIBRARY NAMES webp libwebp REQUIRED)
@@ -84,7 +101,8 @@ target_link_libraries(telegacy-diagnostic PRIVATE
     "${TOMCRYPT_LIBRARY}"
     "${TOMMATH_LIBRARY}"
     miniz::miniz
-    "${RLOTTIE_LIBRARY}"
+    optimized "${RLOTTIE_LIBRARY_RELEASE}"
+    debug "${RLOTTIE_LIBRARY_DEBUG}"
     "${WEBP_LIBRARY}"
     "${JPEG_LIBRARY}"
 
