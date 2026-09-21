@@ -233,14 +233,34 @@ write(h, s)
 # poster thumbnail, so they no longer remain an empty object in the chat.
 # ---------------------------------------------------------------------------
 s = read(m)
-old_sticker_gate = "if (!to_front && IMAGELOADPOLICY == 2) get_photo(NULL, &document, &dcInfoMain);"
-if old_sticker_gate not in s:
-    raise SystemExit("Could not locate sticker thumbnail autoload gate.")
-s = s.replace(
-    old_sticker_gate,
-    "if (!to_front && IMAGELOADPOLICY != 0) get_photo(NULL, &document, &dcInfoMain); // chat_photo_open_sticker_viewport_v81",
-    1,
+sticker_branch = s.find("if (sticker || same_photo) {")
+if sticker_branch < 0:
+    raise SystemExit("Could not locate sticker rendering branch.")
+
+sticker_branch_end = s.find("\n\t\t} else {", sticker_branch)
+if sticker_branch_end < 0:
+    raise SystemExit("Could not isolate sticker rendering branch.")
+
+sticker_block = s[sticker_branch:sticker_branch_end]
+get_photo_pos = sticker_block.find("get_photo(NULL, &document, &dcInfoMain);")
+if get_photo_pos < 0:
+    raise SystemExit("Could not locate sticker thumbnail request.")
+
+line_start = sticker_block.rfind("\n", 0, get_photo_pos) + 1
+line_end = sticker_block.find("\n", get_photo_pos)
+if line_end < 0:
+    line_end = len(sticker_block)
+
+old_line = sticker_block[line_start:line_end]
+indent = old_line[:len(old_line) - len(old_line.lstrip())]
+new_line = (
+    indent +
+    "if (!to_front && IMAGELOADPOLICY != 0) "
+    "get_photo(NULL, &document, &dcInfoMain); "
+    "// chat_photo_open_sticker_viewport_v81"
 )
+sticker_block = sticker_block[:line_start] + new_line + sticker_block[line_end:]
+s = s[:sticker_branch] + sticker_block + s[sticker_branch_end:]
 write(m, s)
 
 # ---------------------------------------------------------------------------
