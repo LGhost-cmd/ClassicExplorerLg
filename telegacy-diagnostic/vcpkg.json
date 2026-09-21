@@ -5,6 +5,7 @@
     "libtomcrypt",
     "miniz",
     "libwebp",
-    "libjpeg-turbo"
+    "libjpeg-turbo",
+    "rlottie"
   ]
 }
