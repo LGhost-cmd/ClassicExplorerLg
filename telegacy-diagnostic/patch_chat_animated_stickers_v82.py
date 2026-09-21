@@ -1298,11 +1298,18 @@ static void media_chat_sticker_activate(
     ChatAnimatedSticker* sticker =
         new ChatAnimatedSticker();
 
-    memset(
-        sticker,
-        0,
-        sizeof(ChatAnimatedSticker)
-    );
+    sticker->anchor_min = 0;
+    sticker->kind = 0;
+    sticker->path[0] = 0;
+    sticker->window = NULL;
+    sticker->lottie = NULL;
+    sticker->video = NULL;
+    sticker->frame = 0;
+    sticker->total_frames = 0;
+    sticker->fps = 0.0;
+    sticker->next_frame_tick = 0;
+    sticker->visible = false;
+    sticker->video_paused_for_visibility = false;
 
     memcpy(
         sticker->id,
