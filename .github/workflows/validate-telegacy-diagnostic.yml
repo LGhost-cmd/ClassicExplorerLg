@@ -57,6 +57,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_animated_stickers_v82.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_animated_sticker_stability_v83.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_media_stickers_forward_links_v84.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_sticker_layout_stability_v85.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -167,6 +168,11 @@ jobs:
           if ($runtime -notmatch "media_chat_sticker_load_webp_v84") { throw "v8.4 static sticker renderer missing" }
           if ($runtime -notmatch "chat_v84_open_forward_origin") { throw "v8.4 forwarded-origin navigation missing" }
           if ($helpers -notmatch "chat v84 forward origin link") { throw "v8.4 forwarded-origin RichEdit link missing" }
+          if ($runtime -notmatch "chat_sticker_layout_stability_v85") { throw "v8.5 runtime marker missing" }
+          if ($runtime -notmatch "media_chat_sticker_ensure_anchor_ole_v85") { throw "v8.5 sticker layout anchor missing" }
+          if ($runtime -notmatch "chat v85 sticker anchor OLE inserted") { throw "v8.5 sticker anchor diagnostic missing" }
+          if ($runtime -notmatch "bool webm_claimed = false") { throw "v8.5 WebM serialization missing" }
+          if ($runtime -notmatch "chat v85 recovered sticker window exception") { throw "v8.5 sticker window crash boundary missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
