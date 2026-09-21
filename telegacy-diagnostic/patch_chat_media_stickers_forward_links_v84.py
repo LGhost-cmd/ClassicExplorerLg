@@ -844,7 +844,12 @@ new_tail = r'''if (name) {
 						forward_link
 					);
 
-					CHARFORMAT2W cf = {0};
+					CHARFORMAT2W cf;
+					memset(
+						&cf,
+						0,
+						sizeof(cf)
+					);
 					cf.cbSize = sizeof(cf);
 					cf.dwMask =
 						CFM_LINK |
@@ -918,6 +923,7 @@ if search_state_anchor not in s:
     raise SystemExit("Could not locate global search state for forward navigation.")
 
 forward_state = r'''
+static void rebuild_chat_combo_by_name(const wchar_t* query);
 static void global_chat_search_begin(const wchar_t* query);
 
 static bool chat_v84_forward_search_pending = false;
