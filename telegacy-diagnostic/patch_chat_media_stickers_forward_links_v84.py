@@ -1318,8 +1318,9 @@ if link_pos < 0:
         "Could not locate existing RichEdit links range match."
     )
 
-link_body_pos =
+link_body_pos = (
     link_pos + len(link_match)
+)
 
 link_private = r'''
 						if (
