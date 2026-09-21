@@ -1307,90 +1307,88 @@ s = s[:gs] + search_func + s[ge:]
 
 
 # Handle private telelegacy-peer target in the existing EN_LINK path.
-link_old = r'''                    if (links[i].chrg.cpMin == pENLink->chrg.cpMin && links[i].chrg.cpMax == pENLink->chrg.cpMax) {
-                        if ((INT_PTR)ShellExecute(NULL, L"open", links[i].lpstrText, NULL, NULL, SW_SHOW) <= 32)
-                            MessageBox(NULL, L"Couldn't open the link!", L"Error", MB_OK | MB_ICONERROR);
-                        found = true;
-                        break;
-                    }'''
+link_match = (
+    "if (links[i].chrg.cpMin == pENLink->chrg.cpMin && "
+    "links[i].chrg.cpMax == pENLink->chrg.cpMax) {"
+)
 
-link_new = r'''                    if (links[i].chrg.cpMin == pENLink->chrg.cpMin && links[i].chrg.cpMax == pENLink->chrg.cpMax) {
-                        if (
-                            links[i].lpstrText &&
-                            _wcsnicmp(
-                                links[i].lpstrText,
-                                L"telegacy-peer:",
-                                14
-                            ) == 0
-                        ) {
-                            int target_type = -1;
-                            unsigned __int64 target_id = 0;
+link_pos = s.find(link_match)
+if link_pos < 0:
+    raise SystemExit(
+        "Could not locate existing RichEdit links range match."
+    )
 
-                            if (
-                                swscanf(
-                                    links[i].lpstrText + 14,
-                                    L"%d:%I64X",
-                                    &target_type,
-                                    &target_id
-                                ) == 2
-                            ) {
-                                int chars =
-                                    pENLink->chrg.cpMax -
-                                    pENLink->chrg.cpMin;
+link_body_pos =
+    link_pos + len(link_match)
 
-                                if (chars < 0)
-                                    chars = 0;
-                                if (chars > 255)
-                                    chars = 255;
+link_private = r'''
+						if (
+							links[i].lpstrText &&
+							_wcsnicmp(
+								links[i].lpstrText,
+								L"telegacy-peer:",
+								14
+							) == 0
+						) {
+							int target_type = -1;
+							unsigned __int64 target_id = 0;
 
-                                wchar_t display_name[256] = {0};
+							if (
+								swscanf(
+									links[i].lpstrText + 14,
+									L"%d:%I64X",
+									&target_type,
+									&target_id
+								) == 2
+							) {
+								int chars =
+									pENLink->chrg.cpMax -
+									pENLink->chrg.cpMin;
 
-                                TEXTRANGE forward_name;
-                                forward_name.chrg =
-                                    pENLink->chrg;
-                                forward_name.lpstrText =
-                                    display_name;
+								if (chars < 0)
+									chars = 0;
+								if (chars > 255)
+									chars = 255;
 
-                                SendMessageW(
-                                    chat,
-                                    EM_GETTEXTRANGE,
-                                    0,
-                                    (LPARAM)&forward_name
-                                );
+								wchar_t display_name[256] = {0};
 
-                                display_name[chars] = 0;
+								TEXTRANGE forward_name;
+								forward_name.chrg =
+									pENLink->chrg;
+								forward_name.lpstrText =
+									display_name;
 
-                                if (
-                                    !chat_v84_open_forward_origin(
-                                        target_type,
-                                        target_id,
-                                        display_name
-                                    )
-                                ) {
-                                    MessageBeep(
-                                        MB_ICONASTERISK
-                                    );
-                                }
-                            }
+								SendMessageW(
+									chat,
+									EM_GETTEXTRANGE,
+									0,
+									(LPARAM)&forward_name
+								);
 
-                            found = true;
-                        } else {
-                            if ((INT_PTR)ShellExecute(NULL, L"open", links[i].lpstrText, NULL, NULL, SW_SHOW) <= 32)
-                                MessageBox(NULL, L"Couldn't open the link!", L"Error", MB_OK | MB_ICONERROR);
+								display_name[chars] = 0;
 
-                            found = true;
-                        }
+								if (
+									!chat_v84_open_forward_origin(
+										target_type,
+										target_id,
+										display_name
+									)
+								) {
+									MessageBeep(
+										MB_ICONASTERISK
+									);
+								}
+							}
 
-                        break;
-                    }'''
+							found = true;
+							break;
+						}
+'''
 
-if link_old not in s:
-    raise SystemExit("Could not locate existing RichEdit links click branch.")
-
-s = s.replace(
-    link_old,
-    link_new,
-    1
+s = (
+    s[:link_body_pos] +
+    link_private +
+    s[link_body_pos:]
 )
 
 write(t, s)
