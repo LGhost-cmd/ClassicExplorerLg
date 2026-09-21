@@ -93,6 +93,7 @@ target_link_libraries(telegacy-diagnostic PRIVATE
     comdlg32
     advapi32
     shell32
+    shlwapi
     ole32
     oleaut32
     uuid
