@@ -128,8 +128,8 @@ for token, path in (
     if token not in read(path):
         raise SystemExit(f"Required predecessor marker missing in {path.name}: {token}")
 
-if "rlottie::rlottie" not in read(cmake):
-    raise SystemExit("CMakeLists.txt does not link rlottie::rlottie.")
+if "RLOTTIE_LIBRARY" not in read(cmake):
+    raise SystemExit("CMakeLists.txt does not link the rlottie library.")
 if '"rlottie"' not in read(manifest):
     raise SystemExit("vcpkg.json does not contain rlottie.")
 
