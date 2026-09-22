@@ -465,7 +465,11 @@ reset_guard = r'''
 reset_func = reset_func[:brace + 1] + "\n" + reset_guard + reset_func[brace + 1:]
 s = s[:rs] + reset_func + s[re:]
 
-us, ue = function_range(s, "static bool media_chat_full_photo_user_action(")
+user_action_definition = """static bool media_chat_full_photo_user_action(
+    Document* document,
+    bool save_and_open
+) {"""
+us, ue = function_range(s, user_action_definition)
 user_func = s[us:ue]
 
 same_anchor = "    bool same_active ="
