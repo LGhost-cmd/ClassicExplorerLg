@@ -75,7 +75,7 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6 -> v8.7.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
@@ -94,6 +94,7 @@ v83 = Path(__file__).resolve().with_name("patch_chat_animated_sticker_stability_
 v84 = Path(__file__).resolve().with_name("patch_chat_media_stickers_forward_links_v84.py")
 v85 = Path(__file__).resolve().with_name("patch_chat_sticker_layout_stability_v85.py")
 v86 = Path(__file__).resolve().with_name("patch_chat_viewport_media_stability_v86.py")
+v87 = Path(__file__).resolve().with_name("patch_chat_media_identity_stability_v87.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -113,6 +114,7 @@ for label, path in (
     ("v8.4", v84),
     ("v8.5", v85),
     ("v8.6", v86),
+    ("v8.7", v87),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -243,6 +245,13 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_chat_media_identity_stability_v87.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -262,5 +271,6 @@ print(
     "plus animation crash containment, and v8.4 strict media replacement, "
     "static/animated sticker fallback rendering, plus forwarded-origin links, "
     "v8.5 bounded square sticker layout plus safer MFPlay lifetime handling, and "
-    "v8.6 stable scrolling, exact clicked-photo replacement, and OLE-backed static stickers."
+    "v8.6 stable scrolling, exact clicked-photo replacement, and OLE-backed static stickers, "
+    "plus v8.7 exact clicked-OLE photo replacement and persistent WebM players across scrolling."
 )
