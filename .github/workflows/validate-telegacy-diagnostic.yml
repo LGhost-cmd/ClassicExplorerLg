@@ -188,7 +188,7 @@ jobs:
           if ($runtime -notmatch "chat v87 photo OLE captured") { throw "v8.7 photo OLE capture missing" }
           if ($runtime -notmatch "chat v87 full photo replaced exact") { throw "v8.7 exact photo replacement missing" }
           if ($runtime -notmatch "chat v87 photo replacement refused") { throw "v8.7 anti-duplication guard missing" }
-          if ($runtime -notmatch "chat v87 WebM paused without release") { throw "v8.7 persistent WebM lifetime path missing" }
+          if (($runtime -notmatch "chat v87 WebM paused without release") -and ($runtime -notmatch "chat v88 WebM paused truly offscreen")) { throw "v8.7/v8.8 persistent WebM visibility path missing" }
           if ($runtime -notmatch "media_chat_sticker_after_scroll_v87") { throw "v8.7 post-scroll reposition missing" }
           if ($procs -notmatch "WM_APP \+ 0x37B") { throw "v8.7 post-scroll message hook missing" }
           if ($runtime -notmatch "chat_runtime_sticker_stability_v88") { throw "v8.8 runtime marker missing" }
