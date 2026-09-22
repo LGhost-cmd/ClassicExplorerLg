@@ -60,6 +60,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_sticker_layout_stability_v85.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_viewport_media_stability_v86.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_media_identity_stability_v87.py"
+          python -m py_compile "telegacy-diagnostic\patch_chat_runtime_sticker_stability_v88.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -190,6 +191,11 @@ jobs:
           if ($runtime -notmatch "chat v87 WebM paused without release") { throw "v8.7 persistent WebM lifetime path missing" }
           if ($runtime -notmatch "media_chat_sticker_after_scroll_v87") { throw "v8.7 post-scroll reposition missing" }
           if ($procs -notmatch "WM_APP \+ 0x37B") { throw "v8.7 post-scroll message hook missing" }
+          if ($runtime -notmatch "chat_runtime_sticker_stability_v88") { throw "v8.8 runtime marker missing" }
+          if ($runtime -notmatch "last_origin_v88") { throw "v8.8 cached sticker geometry missing" }
+          if ($runtime -notmatch "chat v88 WebM resumed inferred=") { throw "v8.8 inferred-geometry resume diagnostic missing" }
+          if ($runtime -notmatch "media_chat_replace_loaded_bitmap_unsafe_v88") { throw "v8.8 async media crash boundary missing" }
+          if ($runtime -notmatch "chat v88 recovered async media replace exception") { throw "v8.8 async media recovery log missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
