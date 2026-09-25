@@ -1,0 +1,33 @@
+name: Cleanup Actions artifacts
+
+on:
+  push:
+    paths:
+      - '.github/workflows/cleanup-artifacts.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete all Actions artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          total=0
+          while :; do
+            ids="$(gh api -H "Accept: application/vnd.github+json" "/repos/$REPO/actions/artifacts?per_page=100" --jq '.artifacts[].id')"
+            [ -z "$ids" ] && break
+            for id in $ids; do
+              gh api --method DELETE "/repos/$REPO/actions/artifacts/$id"
+              total=$((total + 1))
+            done
+          done
+          echo "Deleted $total artifacts."
