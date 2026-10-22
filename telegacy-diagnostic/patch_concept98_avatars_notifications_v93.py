@@ -258,13 +258,13 @@ bool concept98_avatar_handle_upload_v93(
     if (!screen) { DeleteObject(original); return true; }
     HDC src=CreateCompatibleDC(screen);
     HDC dst=CreateCompatibleDC(screen);
-    HBITMAP small=CreateCompatibleBitmap(screen,40,40);
+    HBITMAP thumbBitmap=CreateCompatibleBitmap(screen,40,40);
     HGDIOBJ oldsrc=NULL;
     HGDIOBJ olddst=NULL;
     bool rendered=false;
-    if (src && dst && small) {
+    if (src && dst && thumbBitmap) {
         oldsrc=SelectObject(src,original);
-        olddst=SelectObject(dst,small);
+        olddst=SelectObject(dst,thumbBitmap);
         SetStretchBltMode(dst,HALFTONE);
         rendered = StretchBlt(dst,0,0,40,40,src,
                               0,0,bm.bmWidth,bm.bmHeight,SRCCOPY)!=0;
@@ -276,18 +276,18 @@ bool concept98_avatar_handle_upload_v93(
     ReleaseDC(NULL,screen);
     DeleteObject(original);
     if (!rendered) {
-        if (small) DeleteObject(small);
+        if (thumbBitmap) DeleteObject(thumbBitmap);
         return true;
     }
 
     std::map<__int64,ConceptAvatar93>::iterator it =
         concept98_avatars_v93.find(id);
     if (it==concept98_avatars_v93.end()) {
-        DeleteObject(small);
+        DeleteObject(thumbBitmap);
         return true;
     }
     if (it->second.image) DeleteObject(it->second.image);
-    it->second.image=small;
+    it->second.image=thumbBitmap;
     it->second.last_use=GetTickCount();
     if (concept98_list && IsWindow(concept98_list))
         InvalidateRect(concept98_list,NULL,FALSE);
