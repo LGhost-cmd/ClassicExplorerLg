@@ -49,6 +49,12 @@ def main(root):
             "Loose photo/sticker overlap selection reintroduced")
     results.append("Sticker: no timer OLE writes, same-cp geometry, bounded search")
 
+    require("concept98_static_webp_identity_v104" in cpp and
+            "after_delete_count==before_count-1" in cpp,
+            "Static WebP replacement must verify exact OLE removal")
+    require("concept98 v104 WebP deletion refused" in cpp,
+            "Static WebP duplicate media guard lacks refused diagnostic")
+
     require("media_chat_full_photo_ole_identity_v87" in cpp,
             "Full JPEG replacement lost exact captured OLE identity")
     require("chat v87 full photo replaced exact" in cpp,
