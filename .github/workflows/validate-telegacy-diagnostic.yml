@@ -63,6 +63,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_runtime_sticker_stability_v88.py"
           python -m py_compile "telegacy-diagnostic\patch_safe_jpeg_decode_v89.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_shell_v90.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_polish_v91.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -210,6 +211,12 @@ jobs:
           if ($runtime -notmatch "concept98_apply_layout") { throw "v9.0 split layout missing" }
           if ($runtime -notmatch "WM_APP \+ 0x390") { throw "v9.0 peer sync missing" }
           if ($helpers -notmatch "concept98_enabled && msg == WM_INITDIALOG") { throw "v9.0 Windows 98 notification missing" }
+          if ($runtime -notmatch "concept98_polish_v91") { throw "v9.1 compact shell missing" }
+          if ($runtime -notmatch "concept98_previous_public_count_v91") { throw "v9.1 live Telegram global search results missing" }
+          if ($runtime -notmatch "concept98_badge_hash_v91") { throw "v9.1 stable unread repaint missing" }
+          if ($runtime -notmatch "concept98_move_v91") { throw "v9.1 change-only RichEdit layout missing" }
+          if ($runtime -notmatch "hMessageSearchStatus") { throw "v9.1 search toolbar integration missing" }
+          if ($helpers -notmatch "concept98 v91 new-message popup displayed") { throw "v9.1 notification styling missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
