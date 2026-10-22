@@ -7,7 +7,7 @@ p=Path(sys.argv[1]).resolve()/"src"/"telegacy.cpp"
 s=p.read_text(encoding="latin-1")
 if "concept98_viewport_v100" in s:
     print("v10.0 already applied");raise SystemExit(0)
-if "concept98_sticker_anchors_v94" not in s or "concept98_fast_avatars_v99" not in s:
+if "concept98_sticker_anchors_v94" not in s or "SetTimer(hwnd, 8998, 240, NULL)" not in s:
     raise SystemExit("Requires v9.9")
 
 def rep(a,b,desc):
