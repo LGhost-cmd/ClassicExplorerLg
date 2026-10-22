@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - master
+      - telegacy-concept98
     paths:
       - "telegacy-diagnostic/**"
       - ".github/workflows/build-telegacy-diagnostic.yml"
