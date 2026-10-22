@@ -301,7 +301,9 @@ bool concept98_avatar_handle_upload_v93(
 # via list HWND passed from caller; handle upload repaints using exported HWND.
 code=code.replace("    if (global_chat_search_mode) continue;","    if (SendMessageW(hChatScopeTabs,TCM_GETCURSEL,0,0)==1) continue;")
 code=code.replace("    if (concept98_list && IsWindow(concept98_list))\n        InvalidateRect(concept98_list,NULL,FALSE);",
-                  "    if (hMain && IsWindow(hMain))\n        PostMessageW(hMain,WM_APP+0x390,0,0);")
+                  "    HWND chat_list = hMain ? GetDlgItem(hMain,8910) : NULL;\n"
+                  "    if (chat_list && IsWindow(chat_list))\n"
+                  "        InvalidateRect(chat_list,NULL,FALSE);")
 helpers=helpers[:at]+code+helpers[at:]
 save(h,helpers)
 
