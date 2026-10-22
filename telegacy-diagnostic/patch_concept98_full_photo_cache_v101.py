@@ -147,20 +147,19 @@ s=s.replace(anchor,r'''    media_chat_v87_capture_photo_ole(document);
 
     bool same_active =''',1)
 # Store only fully decoded JPEG data; no speculative low-quality thumbnail.
-marker=r'''            if (replaced) {
-                media_chat_v81_mark_photo_full(
-                    &documents[target]
-                );'''
+marker=r'''        if (full_bitmap) {
+            bool replaced = true;'''
 if marker not in s:raise SystemExit("Full-photo completion marker unavailable")
-s=s.replace(marker,r'''            if (replaced) {
-                concept98_full_photo_save_v101(
-                    media_chat_full_photo_id,
-                    media_chat_full_photo_access_hash,
-                    media_chat_full_photo_bytes
-                );
-                media_chat_v81_mark_photo_full(
-                    &documents[target]
-                );''',1)
+s=s.replace(marker,r'''        if (full_bitmap) {
+            // A successful JPEG decode is valuable even when the current
+            // RichEdit OLE is temporarily unresolved. Keep the verified
+            // bytes for an immediate exact-identity retry on next click.
+            concept98_full_photo_save_v101(
+                media_chat_full_photo_id,
+                media_chat_full_photo_access_hash,
+                media_chat_full_photo_bytes
+            );
+            bool replaced = true;''',1)
 # Avoid falsely declaring a photo full in another chat merely because a
 # deque Document address was re-used and its media id matched.
 marker='        media_chat_animated_sticker_clear();\n        concept98_bootstrap_begin_v100(hWnd);'
