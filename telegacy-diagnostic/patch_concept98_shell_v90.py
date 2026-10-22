@@ -588,13 +588,20 @@ s = replace_once(
     "create controls after status",
 )
 
-# Sync the mirror after the original folder and peer selection has completed.
-case2_anchor = 'current_folder = (ChatsFolder*)SendMessage(hComboBoxFolders, CB_GETITEMDATA, selIndex, 0);'
-s = replace_once(s, case2_anchor, case2_anchor+
-    "\n\t\t\tPostMessageW(hWnd, WM_APP + 0x390, 0, 0);", "folder sync")
-case3_anchor = 'current_peer = (Peer*)SendMessage(hComboBoxChats, CB_GETITEMDATA, selIndex, 0);'
-s = replace_once(s, case3_anchor, case3_anchor+
-    "\n\t\t\tPostMessageW(hWnd, WM_APP + 0x390, 0, 0);", "peer sync")
+# A CBN_SELCHANGE event originates from the authoritative native combo. Its
+# final UI state is mirrored asynchronously after the existing handler returns;
+# no assumptions are made about the implementation of folder/peer replacement.
+s = replace_once(
+    s,
+    '    if (msg == WM_COMMAND && concept98_list &&',
+    '''    if (msg == WM_COMMAND &&
+        (LOWORD(wParam) == 2 || LOWORD(wParam) == 3) &&
+        HIWORD(wParam) == CBN_SELCHANGE) {
+        PostMessageW(hWnd, WM_APP + 0x390, 0, 0);
+    }
+    if (msg == WM_COMMAND && concept98_list &&''',
+    "authoritative combo selection events",
+)
 
 # Listbox owner drawing lives before the original combo/status owner drawing.
 draw_anchor = 'case WM_DRAWITEM: {\n\t\tLPDRAWITEMSTRUCT lpdis = (LPDRAWITEMSTRUCT)lParam;'
