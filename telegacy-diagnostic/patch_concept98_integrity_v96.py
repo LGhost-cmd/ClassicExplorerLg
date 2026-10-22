@@ -329,7 +329,6 @@ if "concept98_real_avatars_v93" not in s or \
 # Add one owner-draw static to the standard chat header.
 needle="static bool concept98_draw_row("
 glyph=r'''// concept98_integrity_v96: current chat avatar, with a clean initials fallback.
-static HWND concept98_header_avatar_v96=NULL;
 static bool concept98_draw_header_v96(const DRAWITEMSTRUCT* dis) {
     if (!dis || dis->CtlID!=8996) return false;
     HDC dc=dis->hDC;
@@ -357,6 +356,9 @@ static bool concept98_draw_header_v96(const DRAWITEMSTRUCT* dis) {
 }
 
 '''
+s=sub(s,"static DWORD concept98_previous_badge_hash_v91 = 0;",
+      "static HWND concept98_header_avatar_v96=NULL;\nstatic DWORD concept98_previous_badge_hash_v91 = 0;",
+      "early chat-avatar declaration")
 s=sub(s,needle,glyph+needle,"header render anchor")
 old="        concept98_chat_title, concept98_chat_detail,\n"
 s=sub(s,old,old+"        concept98_header_avatar_v96,\n","layout controls")
