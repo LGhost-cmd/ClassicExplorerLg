@@ -70,6 +70,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_pixel_icons_v95.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_integrity_v96.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_notification_integrity_v97.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_avatar_thread_safety_v98.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -243,6 +244,8 @@ jobs:
           if ($runtime -notmatch "\(HMENU\)8996") { throw "v9.6 header control registration missing" }
           if ($helpers -notmatch "concept98_notification_integrity_v97") { throw "v9.7 DND native unread behavior missing" }
           if ($runtime -notmatch "concept98 v97 notification mute toggled") { throw "v9.7 DND menu state missing" }
+          if ($helpers -notmatch "concept98_avatar_thread_safety_v98") { throw "v9.8 cross-thread avatar cache mutex missing" }
+          if ($helpers -notmatch "cache_guard\(concept98_avatar_mutex_v98\)") { throw "v9.8 cache locking path missing" }
 
       - name: Concept 98 offline regression contracts
         shell: pwsh
