@@ -197,7 +197,8 @@ sub(anchor,extra+anchor,"right-click context menu")
 # Route shortcuts from the outer pump before IsDialogMessage consumes them.
 loop_start='while (GetMessage(&msg, NULL, 0, 0)) {\n\t\tif (!IsDialogMessage(current_dialog, &msg)) {'
 loop_new=r'''while (GetMessage(&msg, NULL, 0, 0)) {
-        if (concept98_enabled && msg.message == WM_KEYDOWN) {
+        if (concept98_enabled && msg.message == WM_KEYDOWN &&
+            (!current_dialog || !IsWindowVisible(current_dialog))) {
             bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
             if (ctrl &&
                 (msg.wParam == 'K' || msg.wParam == 'F' ||
