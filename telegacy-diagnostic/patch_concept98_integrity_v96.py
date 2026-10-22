@@ -44,7 +44,7 @@ static bool concept98_pending_v96=false;
 static DWORD concept98_pending_tick_v96=0;
 static DWORD concept98_request_after_v96=0;
 
-static ConceptAvatar96Key concept98_key_v96(const Peer* p) {
+static ConceptAvatar96Key concept98_key_v96(Peer* p) {
     return ConceptAvatar96Key(
         p ? (int)p->type : -1,
         p ? (__int64)read_le(p->id,8) : 0
@@ -253,15 +253,15 @@ bool concept98_avatar_handle_upload_v93(
         return true;
     }
     int bytes=(int)tlstr_len(response+12,false);
-    int header=bytes>=254 ? 4 : 1;
+    int header_bytes=bytes>=254 ? 4 : 1;
     if (bytes<4 || bytes>1048576 ||
-        bytes>length-12-header) {
+        bytes>length-12-header_bytes) {
         concept98_avatar_failure_v96(key);
         diag_log("concept98 v96 rejected avatar bytes=%d length=%d",
                  bytes,length);
         return true;
     }
-    HBITMAP original=jpg_to_bmp(response+12+header,bytes);
+    HBITMAP original=jpg_to_bmp(response+12+header_bytes,bytes);
     if (!original) {
         concept98_avatar_failure_v96(key);
         return true;
