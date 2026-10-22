@@ -7,9 +7,11 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1]).resolve()
 helpers = root / "src" / "helpers.cpp"
+response = root / "src" / "response.cpp"
 
-if not helpers.exists():
-    raise SystemExit(f"Missing expected Telegacy file: {helpers}")
+for path in (helpers, response):
+    if not path.exists():
+        raise SystemExit(f"Missing expected Telegacy file: {path}")
 
 
 def read(path):
@@ -457,6 +459,105 @@ HBITMAP jpg_to_bmp(
 s = s[:fs] + replacement + s[fe:]
 write(helpers, s)
 
+
+
+# ---------------------------------------------------------------------------
+# The v8.1 sticker thumbnail path had an ownership bug:
+# WebPDecodeRGBA() -> rgb_to_bmp() -> WebPFree(rgba).
+# rgb_to_bmp() already calls free(rgb), so the subsequent WebPFree was a
+# second free of the same allocation. Depending on heap state this can terminate
+# Telegacy on the next upload.file response with no SEH diagnostic at all.
+# Transfer ownership to rgb_to_bmp exactly once and contain conversion faults.
+# ---------------------------------------------------------------------------
+s = read(response)
+
+webp_old = r'''                        if (
+                            rgba &&
+                            width > 0 &&
+                            height > 0
+                        ) {
+                            hClone =
+                                rgb_to_bmp(
+                                    rgba,
+                                    true,
+                                    width,
+                                    height
+                                );
+
+                            WebPFree(rgba);
+                        }
+'''
+
+webp_new = r'''                        if (
+                            rgba &&
+                            width > 0 &&
+                            height > 0 &&
+                            width <= 4096 &&
+                            height <= 4096
+                        ) {
+                            // safe_jpeg_decode_v89 also fixes WebP ownership:
+                            // rgb_to_bmp owns and frees its input on the normal
+                            // path, so detach rgba before calling it. Never
+                            // WebPFree the same pointer afterwards.
+                            BYTE* owned_rgba = rgba;
+                            rgba = NULL;
+
+                            __try {
+                                hClone =
+                                    rgb_to_bmp(
+                                        owned_rgba,
+                                        true,
+                                        width,
+                                        height
+                                    );
+                            }
+                            __except (
+                                EXCEPTION_EXECUTE_HANDLER
+                            ) {
+                                diag_log(
+                                    "chat v89 WebP bitmap conversion recovered exception=0x%08lX dimensions=%dx%d",
+                                    GetExceptionCode(),
+                                    width,
+                                    height
+                                );
+
+                                hClone = NULL;
+                            }
+                        }
+
+                        // Only buffers not transferred to rgb_to_bmp remain
+                        // owned by libwebp here (for example rejected dimensions).
+                        if (rgba) {
+                            WebPFree(rgba);
+                            rgba = NULL;
+                        }
+'''
+
+if webp_old not in s:
+    raise SystemExit(
+        "Could not locate v8.1 WebP thumbnail ownership block."
+    )
+
+s = s.replace(
+    webp_old,
+    webp_new,
+    1
+)
+
+write(response, s)
+
+response_data = read(response)
+for token in (
+    "safe_jpeg_decode_v89 also fixes WebP ownership",
+    "BYTE* owned_rgba = rgba;",
+    "chat v89 WebP bitmap conversion recovered",
+):
+    if token not in response_data:
+        raise SystemExit(
+            f"v8.9 WebP ownership verification failed: {token}"
+        )
+
+
 data = read(helpers)
 for token in (
     "safe_jpeg_decode_v89",
@@ -470,8 +571,8 @@ for token in (
         raise SystemExit(f"v8.9 verification failed: {token}")
 
 print(
-    "Applied safe JPEG decode v8.9: invalid or unexpected upload.file thumbnail "
-    "payloads can no longer terminate Telegacy through libjpeg's default fatal "
-    "error handler; signature, dimensions, allocation, decoder failures and "
-    "bitmap conversion faults are rejected and logged instead."
+    "Applied safe media decode v8.9: the v8.1 WebP thumbnail double-free is removed "
+    "by transferring RGBA ownership exactly once to rgb_to_bmp, conversion faults "
+    "are contained, and invalid/unexpected JPEG fallback payloads can no longer "
+    "terminate Telegacy through libjpeg's default fatal error handler."
 )
