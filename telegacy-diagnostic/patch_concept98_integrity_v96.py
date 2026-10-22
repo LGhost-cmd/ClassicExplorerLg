@@ -319,6 +319,9 @@ bool concept98_avatar_handle_upload_v93(
 
 '''
 s=s[:begin]+replacement+s[end:]
+s=sub(s,"void logout_cleanup() {",
+      "void logout_cleanup() {\n    concept98_avatar_clear_v93();",
+      "session logout avatar cache cleanup")
 store(helpers,s)
 
 s=load(cpp)
