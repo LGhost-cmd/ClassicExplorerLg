@@ -75,7 +75,7 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6 -> v8.7 -> v8.8 -> v8.9 -> v9.0 -> v9.1 -> v9.2 -> v9.3 -> v9.4 -> v9.5 -> v9.6 -> v9.7 -> v9.8 -> v9.9 -> v10.0 -> v10.1 -> v10.2 -> v10.3.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6 -> v8.7 -> v8.8 -> v8.9 -> v9.0 -> v9.1 -> v9.2 -> v9.3 -> v9.4 -> v9.5 -> v9.6 -> v9.7 -> v9.8 -> v9.9 -> v10.0 -> v10.1 -> v10.2 -> v10.3 -> v10.4.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
@@ -111,6 +111,7 @@ v100 = Path(__file__).resolve().with_name("patch_concept98_viewport_v100.py")
 v101 = Path(__file__).resolve().with_name("patch_concept98_full_photo_cache_v101.py")
 v102 = Path(__file__).resolve().with_name("patch_concept98_visual_finish_v102.py")
 v103 = Path(__file__).resolve().with_name("patch_concept98_photo_hit_v103.py")
+v104 = Path(__file__).resolve().with_name("patch_concept98_static_webp_identity_v104.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -147,6 +148,7 @@ for label, path in (
     ("v10.1", v101),
     ("v10.2", v102),
     ("v10.3", v103),
+    ("v10.4", v104),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -396,6 +398,13 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_static_webp_identity_v104.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -426,5 +435,6 @@ print(
     "and v9.5 classic pixel-action icon controls, v9.6 avatar lifetime and chat-header fixes, "
     "v9.7 notification/DND unread semantics hardening, v9.8 thread-safe avatars, "
     "v9.9 disk thumbnails/parallel requests, v10 verified media geometry/bootstrap, "
-    "v10.1 full photo disk cache, v10.2 original pixel art, and v10.3 unique clicked OLE correction."
+    "v10.1 full photo disk cache, v10.2 original pixel art, v10.3 clicked OLE "
+    "correction, and v10.4 transaction-checked static WebP replacement."
 )
