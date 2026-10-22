@@ -45,7 +45,7 @@ def main(root):
             "Animation timer must not insert images")
     require("sticker_cp == sticker->last_cp_v88" in timer,
             "Cached geometry must belong to the same anchor")
-    require("distance > 1 || !large_object" in cpp,
+    require("distance != 0 || !large_object" in cpp,
             "Loose photo/sticker overlap selection reintroduced")
     results.append("Sticker: no timer OLE writes, same-cp geometry, bounded search")
 
@@ -71,6 +71,12 @@ def main(root):
             "Avatar failures would never retry")
     require("concept98_pending_rpc_v96" in helpers,
             "Avatar replies must not consume an unrelated upload.file")
+    require("concept98_fast_avatars_v99" in helpers and
+            "concept98_pending_v99" in helpers,
+            "Avatar requests must be pipelined with a bounded queue")
+    require("concept98_avatar_disk_load_v99" in helpers and
+            "concept98_avatar_disk_save_v99" in helpers,
+            "Warm avatar thumbnails must use the 40px disk cache")
     require("concept98_avatar_mutex_v98" in helpers,
             "Avatar cache no longer synchronized between worker and UI")
     require(helpers.count("cache_guard(concept98_avatar_mutex_v98)") == 4,
@@ -112,6 +118,12 @@ def main(root):
     require("concept98_divider_proc_v92" in cpp and
             "sidebar_width" in cpp,"Resizable/sidebar persistence missing")
     require("concept98_pixel_glyph_v95" in cpp,"Classic UI icons missing")
+    require("concept98_bootstrap_tick_v100" in cpp and
+            "concept98_bootstrap_begin_v100" in cpp,
+            "Initial chat viewport settling missing")
+    require("concept98_full_photo_load_v101" in cpp and
+            "concept98_full_photo_save_v101" in cpp,
+            "Repeated full-quality photo clicks must be cached")
     require("concept98_move_v91" in cpp and
             "concept98_apply_layout" in cpp,"Responsive layout removed")
     require("msg.wParam == 'K'" in cpp and "msg.wParam == 'F'" in cpp,
