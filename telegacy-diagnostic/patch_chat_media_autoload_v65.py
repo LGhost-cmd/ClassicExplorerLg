@@ -75,7 +75,7 @@ subprocess.check_call([sys.executable, str(v69), str(root)])
 
 # The normal workflow calls v6.4 last. Extend that runner-local script so the
 # complete final chain is deterministic:
-# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6 -> v8.7 -> v8.8 -> v8.9 -> v9.0 -> v9.1 -> v9.2.
+# v6.4 -> v6.6 -> v7.0 -> v7.1 -> v7.2 -> v7.3 -> v7.4 -> v7.5 -> v7.6 -> v7.7 -> v7.8 -> v7.9 -> v8.0 -> v8.1 -> v8.2 -> v8.3 -> v8.4 -> v8.5 -> v8.6 -> v8.7 -> v8.8 -> v8.9 -> v9.0 -> v9.1 -> v9.2 -> v9.3 -> v9.4.
 v64 = Path(__file__).resolve().with_name("patch_chat_media_layout_v64.py")
 v66 = Path(__file__).resolve().with_name("patch_chat_media_dc_retry_v66.py")
 v71 = Path(__file__).resolve().with_name("patch_chat_media_resilience_v71.py")
@@ -100,6 +100,8 @@ v89 = Path(__file__).resolve().with_name("patch_safe_jpeg_decode_v89.py")
 v90 = Path(__file__).resolve().with_name("patch_concept98_shell_v90.py")
 v91 = Path(__file__).resolve().with_name("patch_concept98_polish_v91.py")
 v92 = Path(__file__).resolve().with_name("patch_concept98_interactions_v92.py")
+v93 = Path(__file__).resolve().with_name("patch_concept98_avatars_notifications_v93.py")
+v94 = Path(__file__).resolve().with_name("patch_concept98_sticker_anchors_v94.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -125,6 +127,8 @@ for label, path in (
     ("v9.0", v90),
     ("v9.1", v91),
     ("v9.2", v92),
+    ("v9.3", v93),
+    ("v9.4", v94),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -297,6 +301,20 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_avatars_notifications_v93.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_sticker_anchors_v94.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -322,5 +340,6 @@ print(
     "plus v8.9 non-fatal JPEG thumbnail decoding for upload.file responses, "
     "and v9.0 native Concept 98 two-pane shell and notifications, "
     "followed by v9.1 compact layout, real global search and popup refinements, "
-    "and v9.2 adjustable sidebar plus keyboard/context-menu interactions."
+    "and v9.2 adjustable sidebar plus keyboard/context-menu interactions, "
+    "v9.3 lazy real avatars/notification DND, and v9.4 strict OLE sticker anchoring."
 )
