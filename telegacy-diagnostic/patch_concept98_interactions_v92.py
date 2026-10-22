@@ -150,7 +150,7 @@ sub(
 anchor='    if (msg == WM_COMMAND && LOWORD(wParam) == 8915) {'
 extra=r'''    if (msg == WM_CONTEXTMENU &&
         (HWND)wParam == concept98_list && concept98_enabled) {
-        POINT screen = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        POINT screen = {(SHORT)LOWORD(lParam), (SHORT)HIWORD(lParam)};
         POINT pt = screen;
         if (pt.x == -1 && pt.y == -1) {
             int selected = (int)SendMessageW(
