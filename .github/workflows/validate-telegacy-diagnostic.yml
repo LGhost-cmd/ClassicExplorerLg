@@ -71,6 +71,8 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_integrity_v96.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_notification_integrity_v97.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_avatar_thread_safety_v98.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_fast_avatars_v99.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_viewport_v100.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -246,6 +248,10 @@ jobs:
           if ($runtime -notmatch "concept98 v97 notification mute toggled") { throw "v9.7 DND menu state missing" }
           if ($helpers -notmatch "concept98_avatar_thread_safety_v98") { throw "v9.8 cross-thread avatar cache mutex missing" }
           if ($helpers -notmatch "cache_guard\(concept98_avatar_mutex_v98\)") { throw "v9.8 cache locking path missing" }
+          if ($helpers -notmatch "concept98_fast_avatars_v99") { throw "v9.9 avatar disk cache missing" }
+          if ($helpers -notmatch "concept98_pending_v99") { throw "v9.9 parallel avatar loading missing" }
+          if ($runtime -notmatch "concept98_viewport_v100") { throw "v10 scroll bootstrap missing" }
+          if ($runtime -notmatch "concept98_bootstrap_tick_v100") { throw "v10 delayed stable chat viewport missing" }
 
       - name: Concept 98 offline regression contracts
         shell: pwsh
