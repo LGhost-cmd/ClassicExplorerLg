@@ -19,6 +19,14 @@ def sub(old,new,label):
     if old not in s:raise SystemExit("v10.1 missing "+label)
     s=s.replace(old,new,1)
 
+# The upload.file completion handler is defined above the photo click action,
+# so forward-declare the cache writer before that earlier response function.
+proto="static DCInfo* media_chat_full_photo_dc = NULL; // chat_media_dc_retry_v66"
+if proto not in s:raise SystemExit("Full photo state anchor unavailable")
+s=s.replace(proto,proto+"\nstatic void concept98_full_photo_save_v101(\n"
+    "    const BYTE* id,const BYTE* hash,const std::vector<BYTE>& jpeg);",
+    1)
+
 helpers=r'''// concept98_full_photo_cache_v101
 static bool concept98_full_photo_path_v101(
     const BYTE* id,const BYTE* hash,wchar_t* out,size_t cap
