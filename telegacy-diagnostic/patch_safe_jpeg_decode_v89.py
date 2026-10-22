@@ -456,8 +456,56 @@ HBITMAP jpg_to_bmp(
     return bitmap;
 }'''
 
-s = s[:fs] + replacement + s[fe:]
+rgb_helper = r'''
+// safe_jpeg_decode_v89: SEH isolation lives in this trivial function, not
+// the response handler which has C++ objects requiring stack unwinding.
+HBITMAP media_chat_v89_webp_to_bmp(
+    BYTE* rgba,
+    int width,
+    int height
+) {
+    HBITMAP bitmap = NULL;
+
+    __try {
+        bitmap = rgb_to_bmp(
+            rgba,
+            true,
+            width,
+            height
+        );
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        diag_log(
+            "chat v89 WebP bitmap conversion recovered exception=0x%08lX dimensions=%dx%d",
+            GetExceptionCode(),
+            width,
+            height
+        );
+        bitmap = NULL;
+    }
+
+    return bitmap;
+}
+
+'''
+
+s = s[:fs] + rgb_helper + replacement + s[fe:]
 write(helpers, s)
+
+header = root / "include" / "telegacy.h"
+header_text = read(header)
+header_anchor = "HBITMAP jpg_to_bmp(BYTE* unenc_response, int myjpg_size);"
+if header_anchor not in header_text:
+    raise SystemExit("Could not locate JPEG function declaration.")
+header_text = header_text.replace(
+    header_anchor,
+    header_anchor +
+    "\nHBITMAP media_chat_v89_webp_to_bmp(BYTE* rgba, int width, int height);",
+    1,
+)
+write(header, header_text)
+
+
 
 
 
@@ -502,27 +550,12 @@ webp_new = r'''                        if (
                             BYTE* owned_rgba = rgba;
                             rgba = NULL;
 
-                            __try {
-                                hClone =
-                                    rgb_to_bmp(
-                                        owned_rgba,
-                                        true,
-                                        width,
-                                        height
-                                    );
-                            }
-                            __except (
-                                EXCEPTION_EXECUTE_HANDLER
-                            ) {
-                                diag_log(
-                                    "chat v89 WebP bitmap conversion recovered exception=0x%08lX dimensions=%dx%d",
-                                    GetExceptionCode(),
+                            hClone =
+                                media_chat_v89_webp_to_bmp(
+                                    owned_rgba,
                                     width,
                                     height
                                 );
-
-                                hClone = NULL;
-                            }
                         }
 
                         // Only buffers not transferred to rgb_to_bmp remain
@@ -550,7 +583,7 @@ response_data = read(response)
 for token in (
     "safe_jpeg_decode_v89 also fixes WebP ownership",
     "BYTE* owned_rgba = rgba;",
-    "chat v89 WebP bitmap conversion recovered",
+    "media_chat_v89_webp_to_bmp(",
 ):
     if token not in response_data:
         raise SystemExit(
@@ -566,6 +599,7 @@ for token in (
     "chat v89 JPEG rejected signature",
     "chat v89 JPEG decode recovered",
     "chat v89 JPEG bitmap conversion recovered",
+    "chat v89 WebP bitmap conversion recovered",
 ):
     if token not in data:
         raise SystemExit(f"v8.9 verification failed: {token}")
