@@ -27,7 +27,7 @@ if "concept98_interactions_v92" not in s:
 api=r'''
 // concept98_real_avatars_v93
 void concept98_avatar_pump_v93(HWND list, const std::vector<int>& mapping, bool global_mode);
-bool concept98_avatar_draw_v93(HDC dc, const Peer* peer, RECT bounds);
+bool concept98_avatar_draw_v93(HDC dc, Peer* peer, RECT bounds);
 bool concept98_avatar_handle_upload_v93(
     const BYTE* msgid, BYTE* response, int length
 );
@@ -90,7 +90,7 @@ void concept98_avatar_clear_v93() {
 }
 
 bool concept98_avatar_draw_v93(
-    HDC dc, const Peer* peer, RECT dest
+    HDC dc, Peer* peer, RECT dest
 ) {
     if (!peer || !dc) return false;
     __int64 id = (__int64)read_le(peer->id,8);
@@ -119,7 +119,7 @@ bool concept98_avatar_draw_v93(
     return drawn;
 }
 
-static void concept98_avatar_request_v93(const Peer* peer) {
+static void concept98_avatar_request_v93(Peer* peer) {
     if (!peer || !dcInfoMain.ready ||
         !read_le(peer->photo,8) || !read_le(peer->id,8))
         return;
@@ -188,7 +188,7 @@ void concept98_avatar_pump_v93(HWND list, const std::vector<int>& mapping, bool 
         int slot=(n<0) ? selection : top+n;
         if (slot<0 || slot>=count) continue;
         // Local owner-draw rows keep a mapping to the source folder.
-        const Peer* peer = NULL;
+        Peer* peer = NULL;
         if (n<0) {
             peer=current_peer;
         } else if (slot<(int)mapping.size()) {
@@ -388,6 +388,15 @@ save(t,s)
 
 # Distinct Hide/Close and DND controls in actual popup.
 notif=read(h)
+notif=one(notif,
+    '''void remove_notification() {
+	if (balloon_notifications) {''',
+    '''void remove_notification() {
+	if (current_notification && IsWindow(current_notification)) {
+		DestroyWindow(current_notification);
+		current_notification = NULL;
+	} else if (balloon_notifications) {''',
+    "always destroy concept popup before system balloon")
 notif=one(notif,
     '''    if (concept98_enabled && msg == WM_COMMAND) {
         if (LOWORD(wParam) == 1 || LOWORD(wParam) == 2) {''',
