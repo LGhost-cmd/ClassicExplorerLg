@@ -67,6 +67,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_interactions_v92.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_avatars_notifications_v93.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_anchors_v94.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_pixel_icons_v95.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -230,6 +231,8 @@ jobs:
           if ($response -notmatch "concept98_avatar_handle_upload_v93") { throw "v9.3 avatar RPC dispatch missing" }
           if ($helpers -notmatch "concept98_dnd_set_v93") { throw "v9.3 persistent DND missing" }
           if ($runtime -notmatch "concept98_sticker_anchors_v94") { throw "v9.4 strict sticker anchoring missing" }
+          if ($runtime -notmatch "concept98_pixel_icons_v95") { throw "v9.5 pixel-action glyphs missing" }
+          if ($runtime -notmatch "concept98_action_button_v95") { throw "v9.5 owner-drawn button handler missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
