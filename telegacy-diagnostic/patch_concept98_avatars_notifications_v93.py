@@ -26,7 +26,7 @@ if "concept98_interactions_v92" not in s:
 
 api=r'''
 // concept98_real_avatars_v93
-void concept98_avatar_pump_v93(HWND list);
+void concept98_avatar_pump_v93(HWND list, const std::vector<int>& mapping, bool global_mode);
 bool concept98_avatar_draw_v93(HDC dc, const Peer* peer, RECT bounds);
 bool concept98_avatar_handle_upload_v93(
     const BYTE* msgid, BYTE* response, int length
@@ -124,15 +124,15 @@ static void concept98_avatar_request_v93(const Peer* peer) {
         !read_le(peer->photo,8) || !read_le(peer->id,8))
         return;
 
-    BYTE unenc_query[112]={0};
-    BYTE enc_query[136]={0};
+    BYTE unenc_query[256]={0};
+    BYTE enc_query[280]={0};
     internal_header(unenc_query,true);
     write_le(unenc_query+32,0xbe5335be,4);
     memset(unenc_query+36,0,4);
     write_le(unenc_query+40,0x37257e99,4);
     memset(unenc_query+44,0,4);
     int offset=48+place_peer(unenc_query+48,(Peer*)peer,true);
-    if (offset>96 || offset<48) return;
+    if (offset>210 || offset<48) return;
     memcpy(unenc_query+offset,peer->photo,8);
     offset+=8;
     memset(unenc_query+offset,0,8);
@@ -141,6 +141,7 @@ static void concept98_avatar_request_v93(const Peer* peer) {
     offset+=4;
     write_le(unenc_query+28,offset-32,4);
     int pad=get_padding(offset);
+    if (pad<0 || offset+pad>256) return;
     fortuna_read(unenc_query+offset,pad,&prng);
     offset+=pad;
     convert_message(unenc_query,enc_query,offset,0);
@@ -151,8 +152,8 @@ static void concept98_avatar_request_v93(const Peer* peer) {
     send_query(enc_query,offset+24);
 }
 
-void concept98_avatar_pump_v93(HWND list) {
-    if (!concept98_enabled || !list ||
+void concept98_avatar_pump_v93(HWND list, const std::vector<int>& mapping, bool global_mode) {
+    if (!concept98_enabled || global_mode || !list ||
         !IsWindowVisible(list) || !current_folder ||
         !current_folder->peers || !peers)
         return;
@@ -186,12 +187,18 @@ void concept98_avatar_pump_v93(HWND list) {
     for (int n=-1;n<visible;n++) {
         int slot=(n<0) ? selection : top+n;
         if (slot<0 || slot>=count) continue;
-        if (global_chat_search_mode) continue;
-
-        // Map indices belong to Concept 98, not the network layer.
-        // The current local folder can be filtered, so ask caller for peer.
-        // The selected peer is authoritative and always safe.
-        const Peer* peer = (n<0) ? current_peer : NULL;
+        // Local owner-draw rows keep a mapping to the source folder.
+        const Peer* peer = NULL;
+        if (n<0) {
+            peer=current_peer;
+        } else if (slot<(int)mapping.size()) {
+            int folder_slot=mapping[slot];
+            if (folder_slot>=0 &&
+                folder_slot<current_folder->count) {
+                int id=current_folder->peers[folder_slot];
+                if (id>=0 && id<peers_count) peer=&peers[id];
+            }
+        }
         if (!peer) continue;
         __int64 id=(__int64)read_le(peer->id,8);
         if (!id || !read_le(peer->photo,8)) continue;
@@ -330,7 +337,7 @@ s=one(s,'    DrawTextW(dc, initials, -1, &avatar,\n              DT_SINGLELINE |
         '    if (!avatar_found)\n        DrawTextW(dc, initials, -1, &avatar,\n                  DT_SINGLELINE | DT_CENTER | DT_VCENTER);',
         "avatar fallback initials")
 s=one(s,'        concept98_sync();\n        if (concept98_enabled &&',
-        '        concept98_sync();\n        concept98_avatar_pump_v93(concept98_list);\n        if (concept98_enabled &&',
+        '        concept98_sync();\n        concept98_avatar_pump_v93(concept98_list,concept98_folder_indices,global_chat_search_mode);\n        if (concept98_enabled &&',
         "avatar pump timer")
 s=one(s,'\t\tKillTimer(hWnd, CONCEPT98_TIMER);',
         '\t\tKillTimer(hWnd, CONCEPT98_TIMER);\n'
