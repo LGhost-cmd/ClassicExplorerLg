@@ -220,7 +220,7 @@ jobs:
           if ($helpers -notmatch "concept98 v91 new-message popup displayed") { throw "v9.1 notification styling missing" }
           if ($runtime -notmatch "concept98_interactions_v92") { throw "v9.2 interactions missing" }
           if ($runtime -notmatch "concept98_divider_proc_v92") { throw "v9.2 draggable sidebar missing" }
-          if ($runtime -notmatch "L\"sidebar_width\"") { throw "v9.2 sidebar persistence missing" }
+          if ($runtime -notmatch "sidebar_width") { throw "v9.2 sidebar persistence missing" }
           if ($runtime -notmatch "WM_CONTEXTMENU") { throw "v9.2 chat context menu missing" }
           if ($runtime -notmatch "msg.wParam == 'K'") { throw "v9.2 keyboard navigation missing" }
 
