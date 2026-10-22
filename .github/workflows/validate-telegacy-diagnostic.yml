@@ -76,6 +76,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_full_photo_cache_v101.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_visual_finish_v102.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_hit_v103.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_static_webp_identity_v104.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -260,6 +261,8 @@ jobs:
           if ($runtime -notmatch "concept98_visual_finish_v102") { throw "v10.2 pixel icon polish missing" }
           if ($runtime -notmatch "static const char\* search\[16\]") { throw "v10.2 pixel sprite drawing missing" }
           if ($runtime -notmatch "concept98_photo_hit_v103") { throw "v10.3 unique OLE click correction missing" }
+          if ($runtime -notmatch "concept98_static_webp_identity_v104") { throw "v10.4 static WebP transaction guard missing" }
+          if ($runtime -notmatch "after_delete_count==before_count-1") { throw "v10.4 static WebP exact object deletion verification missing" }
 
       - name: Concept 98 offline regression contracts
         shell: pwsh
