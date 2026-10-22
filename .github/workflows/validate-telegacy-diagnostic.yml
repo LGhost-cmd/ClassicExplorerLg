@@ -2,7 +2,7 @@ name: Validate Telegacy diagnostic patches
 
 on:
   push:
-    branches: [master]
+    branches: [master, telegacy-concept98]
     paths:
       - 'telegacy-diagnostic/**'
       - '.github/workflows/validate-telegacy-diagnostic.yml'
@@ -62,6 +62,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_chat_media_identity_stability_v87.py"
           python -m py_compile "telegacy-diagnostic\patch_chat_runtime_sticker_stability_v88.py"
           python -m py_compile "telegacy-diagnostic\patch_safe_jpeg_decode_v89.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_shell_v90.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -203,6 +204,11 @@ jobs:
           if ($helpers -notmatch "chat v89 JPEG decode recovered") { throw "v8.9 JPEG fatal decode recovery missing" }
           if ($response -notmatch "BYTE\* owned_rgba = rgba") { throw "v8.9 WebP ownership transfer missing" }
           if ($response -notmatch "chat v89 WebP bitmap conversion recovered") { throw "v8.9 WebP conversion recovery missing" }
+          if ($runtime -notmatch "concept98_shell_v90") { throw "v9.0 native shell missing" }
+          if ($runtime -notmatch "concept98_draw_row") { throw "v9.0 listbox renderer missing" }
+          if ($runtime -notmatch "concept98_apply_layout") { throw "v9.0 split layout missing" }
+          if ($runtime -notmatch "WM_APP \+ 0x390") { throw "v9.0 peer sync missing" }
+          if ($helpers -notmatch "concept98_enabled && msg == WM_INITDIALOG") { throw "v9.0 Windows 98 notification missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
