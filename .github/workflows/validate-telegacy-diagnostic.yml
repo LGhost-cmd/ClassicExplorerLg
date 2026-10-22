@@ -64,6 +64,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_safe_jpeg_decode_v89.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_shell_v90.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_polish_v91.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_interactions_v92.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -217,6 +218,11 @@ jobs:
           if ($runtime -notmatch "concept98_move_v91") { throw "v9.1 change-only RichEdit layout missing" }
           if ($runtime -notmatch "hMessageSearchStatus") { throw "v9.1 search toolbar integration missing" }
           if ($helpers -notmatch "concept98 v91 new-message popup displayed") { throw "v9.1 notification styling missing" }
+          if ($runtime -notmatch "concept98_interactions_v92") { throw "v9.2 interactions missing" }
+          if ($runtime -notmatch "concept98_divider_proc_v92") { throw "v9.2 draggable sidebar missing" }
+          if ($runtime -notmatch "L\"sidebar_width\"") { throw "v9.2 sidebar persistence missing" }
+          if ($runtime -notmatch "WM_CONTEXTMENU") { throw "v9.2 chat context menu missing" }
+          if ($runtime -notmatch "msg.wParam == 'K'") { throw "v9.2 keyboard navigation missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
