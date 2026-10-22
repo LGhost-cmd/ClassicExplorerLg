@@ -68,6 +68,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_avatars_notifications_v93.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_anchors_v94.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_pixel_icons_v95.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_integrity_v96.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -233,6 +234,11 @@ jobs:
           if ($runtime -notmatch "concept98_sticker_anchors_v94") { throw "v9.4 strict sticker anchoring missing" }
           if ($runtime -notmatch "concept98_pixel_icons_v95") { throw "v9.5 pixel-action glyphs missing" }
           if ($runtime -notmatch "concept98_action_button_v95") { throw "v9.5 owner-drawn button handler missing" }
+          if ($helpers -notmatch "concept98_integrity_v96") { throw "v9.6 avatar identity/retry implementation missing" }
+          if ($helpers -notmatch "concept98_avatar_failure_v96") { throw "v9.6 avatar retry on failure missing" }
+          if ($helpers -notmatch "concept98_pending_rpc_v96") { throw "v9.6 request identity isolation missing" }
+          if ($runtime -notmatch "concept98_draw_header_v96") { throw "v9.6 chat-header avatar drawing missing" }
+          if ($runtime -notmatch "\(HMENU\)8996") { throw "v9.6 header control registration missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
