@@ -19,6 +19,7 @@ def one(s,old,new,label):
     return s.replace(old,new,1)
 
 s=read(t)
+# concept98_real_avatars_v93
 if "concept98_real_avatars_v93" in s:
     print("Concept 98 v9.3 already applied"); raise SystemExit(0)
 if "concept98_interactions_v92" not in s:
@@ -333,6 +334,8 @@ new=r'''    bool avatar_found = concept98_avatar_draw_v93(
 
     HFONT oldfont = (HFONT)SelectObject(dc, hFonts[2]);'''
 s=one(s,old,new,"owner draw avatar")
+s=s.replace("static bool concept98_draw_row(",
+            "// concept98_real_avatars_v93\nstatic bool concept98_draw_row(",1)
 s=one(s,'    DrawTextW(dc, initials, -1, &avatar,\n              DT_SINGLELINE | DT_CENTER | DT_VCENTER);',
         '    if (!avatar_found)\n        DrawTextW(dc, initials, -1, &avatar,\n                  DT_SINGLELINE | DT_CENTER | DT_VCENTER);',
         "avatar fallback initials")
