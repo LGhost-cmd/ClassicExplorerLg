@@ -145,7 +145,7 @@ static bool concept98_match(
 
     size_t needle_len = wcslen(needle);
     for (const wchar_t* cursor = value; *cursor; ++cursor) {
-        if (_wcsnicmp(cursor, needle, needle_len) == 0)
+        if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE,\n                           cursor, (int)needle_len,\n                           needle, (int)needle_len) == CSTR_EQUAL)
             return true;
     }
     return false;
@@ -414,7 +414,7 @@ static void concept98_create_controls(HWND hwnd) {
     concept98_list = CreateWindowExW(
         WS_EX_CLIENTEDGE, L"LISTBOX", L"",
         panel | WS_VSCROLL | LBS_NODATA | LBS_OWNERDRAWFIXED |
-        LBS_NOTIFY | LBS_WANTKEYBOARDINPUT | LBS_NOINTEGRALHEIGHT,
+        LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
         8,160,220,320,hwnd,(HMENU)CONCEPT98_LIST_ID,NULL,NULL);
     SendMessageW(concept98_list, LB_SETITEMHEIGHT, 0, 47);
 
