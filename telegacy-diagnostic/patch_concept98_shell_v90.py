@@ -145,7 +145,9 @@ static bool concept98_match(
 
     size_t needle_len = wcslen(needle);
     for (const wchar_t* cursor = value; *cursor; ++cursor) {
-        if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE,\n                           cursor, (int)needle_len,\n                           needle, (int)needle_len) == CSTR_EQUAL)
+        if (CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE,
+                           cursor, (int)needle_len,
+                           needle, (int)needle_len) == CSTR_EQUAL)
             return true;
     }
     return false;
