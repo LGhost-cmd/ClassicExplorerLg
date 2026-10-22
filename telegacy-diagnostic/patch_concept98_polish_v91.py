@@ -767,13 +767,11 @@ s = one(
     s,
     '    if (msg == WM_APP + 0x390) {\n        concept98_sync();\n        concept98_apply_layout(hWnd);\n        return 0;\n    }',
     '''    if (msg == WM_APP + 0x390) {
-        bool scope_before = concept98_previous_global_v91;
-        bool was_writable = concept98_last_writable_v91;
         concept98_sync();
-        bool writable = !(current_peer && !current_peer->perm.cansendmsg);
-        if (concept98_enabled &&
-            (scope_before != concept98_previous_global_v91 ||
-             writable != was_writable))
+        // The stock CBN handler resizes RichEdit after every peer change.
+        // Restore the concept viewport; concept98_move_v91 is no-op when
+        // the target rectangle is already correct.
+        if (concept98_enabled)
             concept98_apply_layout(hWnd);
         return 0;
     }''',
