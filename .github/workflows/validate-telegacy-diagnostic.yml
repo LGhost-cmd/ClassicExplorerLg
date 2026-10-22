@@ -70,6 +70,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_pixel_icons_v95.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_integrity_v96.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_notification_integrity_v97.py"
+          python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -242,6 +243,10 @@ jobs:
           if ($runtime -notmatch "\(HMENU\)8996") { throw "v9.6 header control registration missing" }
           if ($helpers -notmatch "concept98_notification_integrity_v97") { throw "v9.7 DND native unread behavior missing" }
           if ($runtime -notmatch "concept98 v97 notification mute toggled") { throw "v9.7 DND menu state missing" }
+
+      - name: Concept 98 offline regression contracts
+        shell: pwsh
+        run: python telegacy-diagnostic/test_concept98_regression.py telegacy-src
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
