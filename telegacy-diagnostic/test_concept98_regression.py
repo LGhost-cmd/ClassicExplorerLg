@@ -71,6 +71,12 @@ def main(root):
             "Avatar failures would never retry")
     require("concept98_pending_rpc_v96" in helpers,
             "Avatar replies must not consume an unrelated upload.file")
+    require("concept98_avatar_mutex_v98" in helpers,
+            "Avatar cache no longer synchronized between worker and UI")
+    require(helpers.count("cache_guard(concept98_avatar_mutex_v98)") == 4,
+            "Avatar cache lock must guard paint/pump/reply/cleanup")
+    require("concept98_avatar_clear_v93();" in method(helpers,"void logout_cleanup()"),
+            "Avatar cache must be freed on account logout")
     require("concept98_avatar_request_v96" in helpers,
             "Real avatar loader missing")
     require("concept98_avatar_draw_v93" in cpp,
