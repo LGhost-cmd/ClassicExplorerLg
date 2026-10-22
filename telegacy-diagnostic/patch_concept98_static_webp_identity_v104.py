@@ -15,6 +15,13 @@ if start<0:raise SystemExit("Missing static WebP sticker OLE commit")
 if end<0:end=s.find("static bool media_chat_sticker_",start+10)
 if end<0:raise SystemExit("Unable to isolate static WebP commit")
 block=s[start:end]
+# C++ declarations are needed even if the v8.7 definitions happen to be
+# physically below the v8.6 sticker helper in a particular patch ordering.
+forward=r'''static bool media_chat_v87_query_bitmap_identity(IOleObject*,IUnknown**);
+static int media_chat_v87_find_identity_cp(IUnknown*);
+static LONG media_chat_v87_object_count();
+static bool media_chat_v87_exact_bitmap_at_cp(int);
+'''
 point=r'''    CHARRANGE selection = {0};'''
 if point not in block:raise SystemExit("WebP initial range marker missing")
 inject=r'''    // concept98_static_webp_identity_v104
@@ -108,7 +115,7 @@ new=r'''    if (inserted) {
     return inserted;'''
 if old not in block:raise SystemExit("WebP completion confirmation missing")
 block=block.replace(old,new,1)
-s=s[:start]+block+s[end:]
+s=s[:start]+forward+block+s[end:]
 p.write_text(s,encoding="latin-1",newline="\r\n")
 for marker in ("concept98_static_webp_identity_v104","old_identity",
                "after_delete_count==before_count-1","concept98 v104 WebP"):
