@@ -105,6 +105,7 @@ for token in (
 # state; the visual layer does not fabricate result items.
 sync_code = r'''static DWORD concept98_previous_badge_hash_v91 = 0;
 static bool concept98_previous_global_v91 = false;
+static int concept98_previous_public_count_v91 = -1;
 static HFONT concept98_heading_font_v91 = NULL;
 static HWND concept98_divider_v91 = NULL;
 static HWND concept98_brand_icon_v91 = NULL;
@@ -159,10 +160,10 @@ static void concept98_sync() {
             ShowWindow(concept98_filter, global_mode ? SW_HIDE : SW_SHOW);
         if (hChatSearch)
             ShowWindow(hChatSearch, global_mode ? SW_SHOW : SW_HIDE);
-        if (concept98_list)
-            ShowWindow(concept98_list, global_mode ? SW_HIDE : SW_SHOW);
-        if (hComboBoxChats)
-            ShowWindow(hComboBoxChats, global_mode ? SW_SHOW : SW_HIDE);
+        // Use one visible owner-draw list for local and global results;
+        // the native combo still owns the authoritative selection.
+        ShowWindow(concept98_list, SW_SHOW);
+        ShowWindow(hComboBoxChats, SW_HIDE);
     }
 
     if (!global_mode) {
@@ -181,6 +182,7 @@ static void concept98_sync() {
         }
 
         bool mapping_changed =
+            changed_scope ||
             current_folder != concept98_list_folder ||
             filtered != concept98_folder_indices ||
             wcscmp(query, concept98_previous_filter) != 0;
@@ -242,21 +244,34 @@ static void concept98_sync() {
             if (wcscmp(previous, label) != 0)
                 SetWindowTextW(concept98_list_caption, label);
         }
-    } else if (concept98_list_caption) {
-        // The number of public hits is reflected by Telegacy's own combo.
+    } else {
+        // Mirror COUNT and SELECTION from Telegram's native search combo,
+        // without taking ownership of its result peers.
         int count = hComboBoxChats ?
             (int)SendMessageW(hComboBoxChats, CB_GETCOUNT, 0, 0) : 0;
         if (count < 0) count = 0;
+        if (changed_scope || count != concept98_previous_public_count_v91) {
+            concept98_previous_public_count_v91 = count;
+            SendMessageW(concept98_list, LB_SETCOUNT, count, 0);
+            InvalidateRect(concept98_list, NULL, FALSE);
+        }
+        int selected = hComboBoxChats ?
+            (int)SendMessageW(hComboBoxChats, CB_GETCURSEL, 0, 0) : -1;
+        if ((int)SendMessageW(concept98_list, LB_GETCURSEL, 0, 0)
+              != selected)
+            SendMessageW(concept98_list, LB_SETCURSEL, selected, 0);
         wchar_t label[70] = {0};
         _snwprintf_s(
             label, ARRAYSIZE(label), _TRUNCATE,
             L"\x0420\x0435\x0437\x0443\x043b\x044c\x0442\x0430\x0442\x044b  (%d)", count
         );
-        wchar_t previous[70] = {0};
-        GetWindowTextW(concept98_list_caption, previous,
-                       ARRAYSIZE(previous));
-        if (wcscmp(previous, label) != 0)
-            SetWindowTextW(concept98_list_caption, label);
+        if (concept98_list_caption) {
+            wchar_t previous[70] = {0};
+            GetWindowTextW(concept98_list_caption, previous,
+                           ARRAYSIZE(previous));
+            if (wcscmp(previous, label) != 0)
+                SetWindowTextW(concept98_list_caption, label);
+        }
     }
 
     if (current_peer && current_peer->name) {
@@ -382,8 +397,8 @@ static void concept98_apply_layout(HWND hwnd) {
     // A public Telegram result must never be hidden behind our local list.
     ShowWindow(concept98_filter, global_mode ? SW_HIDE : SW_SHOW);
     ShowWindow(hChatSearch, global_mode ? SW_SHOW : SW_HIDE);
-    ShowWindow(concept98_list, global_mode ? SW_HIDE : SW_SHOW);
-    ShowWindow(hComboBoxChats, global_mode ? SW_SHOW : SW_HIDE);
+    ShowWindow(concept98_list, SW_SHOW);
+    ShowWindow(hComboBoxChats, SW_HIDE);
 
     // Main conversation header: identity + native actions.
     const int header_top = 7;
@@ -487,18 +502,28 @@ row_code = r'''static bool concept98_draw_row(
 ) {
     if (!dis || dis->CtlID != CONCEPT98_LIST_ID)
         return false;
-    if (dis->itemID == (UINT)-1 ||
-        dis->itemID >= concept98_folder_indices.size() ||
-        !current_folder || !peers)
-        return true;
-
-    int slot = concept98_folder_indices[dis->itemID];
-    if (slot < 0 || slot >= current_folder->count)
-        return true;
-    int id = current_folder->peers[slot];
-    if (id < 0 || id >= peers_count)
-        return true;
-    Peer* peer = &peers[id];
+    if (dis->itemID == (UINT)-1) return true;
+    Peer* peer = NULL;
+    if (global_chat_search_mode) {
+        // Telegacy retains peer ownership, we look up by result slot.
+        int count = (int)SendMessageW(
+            hComboBoxChats, CB_GETCOUNT, 0, 0
+        );
+        if (count < 0 || dis->itemID >= (UINT)count) return true;
+        LRESULT item = SendMessageW(
+            hComboBoxChats, CB_GETITEMDATA, dis->itemID, 0
+        );
+        if (item == CB_ERR || item == 0) return true;
+        peer = (Peer*)item;
+    } else {
+        if (dis->itemID >= concept98_folder_indices.size() ||
+            !current_folder || !peers) return true;
+        int slot = concept98_folder_indices[dis->itemID];
+        if (slot < 0 || slot >= current_folder->count) return true;
+        int id = current_folder->peers[slot];
+        if (id < 0 || id >= peers_count) return true;
+        peer = &peers[id];
+    }
 
     RECT rc = dis->rcItem;
     HDC dc = dis->hDC;
@@ -602,6 +627,8 @@ row_code = r'''static bool concept98_draw_row(
 }'''
 
 s = replace_func(s, "static bool concept98_draw_row(", row_code)
+
+s = one(s, "            if (idx >= 0 && idx < (int)concept98_folder_indices.size()) {\n                int folder_idx = concept98_folder_indices[idx];\n                SendMessageW(hComboBoxChats, CB_SETCURSEL, folder_idx, 0);", "            int combo_idx = -1;\n            if (global_chat_search_mode) {\n                int count = (int)SendMessageW(\n                    hComboBoxChats, CB_GETCOUNT, 0, 0\n                );\n                if (idx >= 0 && idx < count) combo_idx = idx;\n            } else if (idx >= 0 &&\n                       idx < (int)concept98_folder_indices.size()) {\n                combo_idx = concept98_folder_indices[idx];\n            }\n            if (combo_idx >= 0) {\n                SendMessageW(hComboBoxChats, CB_SETCURSEL, combo_idx, 0);", "global search listbox routing")
 
 # Existing controls are preserved and styled, with no duplicate chat search
 # that masquerades as the global Telegram server-search engine.
