@@ -187,7 +187,7 @@ jobs:
           New-Item -ItemType Directory -Force artifact | Out-Null
 
           $exe = Get-ChildItem telegacy-build -Recurse -Filter "telegacy-diagnostic.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($exe) { Copy-Item $exe.FullName artifact\ }
+          if ($exe) { Copy-Item $exe.FullName "artifact\Telegacy-Concept98.exe" -Force }
 
           $pdb = Get-ChildItem telegacy-build -Recurse -Filter "telegacy-diagnostic.pdb" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($pdb) { Copy-Item $pdb.FullName artifact\ }
@@ -231,10 +231,14 @@ jobs:
           Copy-Item "telegacy-src\src\message.cpp" artifact\message-diag.cpp -Force
 
           @"
-          Telegacy diagnostic build
-          =========================
+          Telegacy Concept 98 (Win32 x86) - working UI preview
+          ===================================================
 
-          Run telegacy-diagnostic.exe normally.
+          Run Telegacy-Concept98.exe from this extracted folder.
+          The native Concept 98 UI is enabled by default on this branch.
+          Tools -> Telegram 98 - view toggles the two-pane layout.
+          Original chat transport, message editor, media and search remain active.
+          This is not a stand-alone Windows desktop shell.
 
           The runtime trace is written to:
               %TEMP%\Telegacy-diagnostic.log
@@ -251,6 +255,6 @@ jobs:
       - name: Upload diagnostic artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Telegacy-1.0.4-diagnostic-x86
+          name: Telegacy-Concept98-v9.0-x86
           path: artifact
           if-no-files-found: error
