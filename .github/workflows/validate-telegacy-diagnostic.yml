@@ -203,7 +203,8 @@ jobs:
           if ($helpers -notmatch "chat v89 JPEG rejected signature") { throw "v8.9 JPEG signature guard missing" }
           if ($helpers -notmatch "chat v89 JPEG decode recovered") { throw "v8.9 JPEG fatal decode recovery missing" }
           if ($response -notmatch "BYTE\* owned_rgba = rgba") { throw "v8.9 WebP ownership transfer missing" }
-          if ($response -notmatch "chat v89 WebP bitmap conversion recovered") { throw "v8.9 WebP conversion recovery missing" }
+          if ($helpers -notmatch "chat v89 WebP bitmap conversion recovered") { throw "v8.9 WebP SEH recovery helper missing" }
+          if ($response -notmatch "media_chat_v89_webp_to_bmp") { throw "v8.9 WebP helper dispatch missing" }
           if ($runtime -notmatch "concept98_shell_v90") { throw "v9.0 native shell missing" }
           if ($runtime -notmatch "concept98_draw_row") { throw "v9.0 listbox renderer missing" }
           if ($runtime -notmatch "concept98_apply_layout") { throw "v9.0 split layout missing" }
