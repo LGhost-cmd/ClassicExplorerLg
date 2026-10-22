@@ -838,7 +838,7 @@ end = src.find('    if (concept98_enabled && msg == WM_COMMAND)',start)
 if start < 0 or end < 0:
     raise SystemExit("v9.1 notification override anchor missing")
 
-notification = r'''    // concept98_polish_v91 — native Win9x popup with readable controls.
+notification = r'''    // concept98_polish_v91 - native Win9x popup with readable controls.
     if (concept98_enabled &&
         (msg == WM_CTLCOLORDLG || msg == WM_CTLCOLORSTATIC)) {
         HDC dc = (HDC)wParam;
