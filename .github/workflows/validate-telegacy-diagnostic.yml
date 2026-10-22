@@ -69,6 +69,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_anchors_v94.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_pixel_icons_v95.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_integrity_v96.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_notification_integrity_v97.py"
 
       - name: Apply complete diagnostic patch chain
         shell: pwsh
@@ -239,6 +240,8 @@ jobs:
           if ($helpers -notmatch "concept98_pending_rpc_v96") { throw "v9.6 request identity isolation missing" }
           if ($runtime -notmatch "concept98_draw_header_v96") { throw "v9.6 chat-header avatar drawing missing" }
           if ($runtime -notmatch "\(HMENU\)8996") { throw "v9.6 header control registration missing" }
+          if ($helpers -notmatch "concept98_notification_integrity_v97") { throw "v9.7 DND native unread behavior missing" }
+          if ($runtime -notmatch "concept98 v97 notification mute toggled") { throw "v9.7 DND menu state missing" }
 
       - name: Configure Win32 RelWithDebInfo
         shell: pwsh
