@@ -195,11 +195,14 @@ static bool concept98_forward_hit_v130(const ENLINK* event){
 }
 '''
 s=one(s,global_anchor,viewer+"\n"+global_anchor,"viewer implementation")
-anchor='''        if (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK && (pENLink->msg == WM_LBUTTONDOWN)) {
-			bool found = false;'''
-repl='''        if (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK && (pENLink->msg == WM_LBUTTONDOWN)) {
-            if(concept98_enabled && concept98_forward_hit_v130(pENLink))return 0;
-			bool found = false;'''
+anchor='''		} else if (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK &&
+			(pENLink->msg == WM_LBUTTONDOWN || pENLink->msg == WM_LBUTTONDBLCLK)) {
+			bool media_double_click = (pENLink->msg == WM_LBUTTONDBLCLK);'''
+repl='''		} else if (pNMHDR->hwndFrom == chat && pNMHDR->code == EN_LINK &&
+			(pENLink->msg == WM_LBUTTONDOWN || pENLink->msg == WM_LBUTTONDBLCLK)) {
+            if(concept98_enabled && pENLink->msg==WM_LBUTTONDOWN &&
+               concept98_forward_hit_v130(pENLink))return 0;
+			bool media_double_click = (pENLink->msg == WM_LBUTTONDBLCLK);'''
 s=one(s,anchor,repl,"forward link event handler")
 m.write_text(a,encoding="latin-1",newline="\r\n")
 t.write_text(s,encoding="latin-1",newline="\r\n")
