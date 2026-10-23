@@ -55,9 +55,7 @@ static HICON concept98_asset_icon_v107(int id) {
 }
 
 '''
-s=s.replace(sig,prefix+sig+"
-    HICON native=concept98_asset_icon_v107(id);
-    if(native) {DrawIconEx(dc,x,y,native,16,16,0,NULL,DI_NORMAL);return;}",1)
+s=s.replace(sig,prefix+sig+"""\n    HICON native=concept98_asset_icon_v107(id);\n    if(native) {DrawIconEx(dc,x,y,native,16,16,0,NULL,DI_NORMAL);return;}""",1)
 p.write_text(s,encoding="latin-1",newline="\r\n")
 print("v10.7 uses actual archived Win98 icons for Search/Profile/More "
       "with the original pixel-art fallback if the files are unavailable.")
