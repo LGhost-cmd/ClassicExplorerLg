@@ -28,7 +28,7 @@ if 'extern bool concept98_enabled;' not in t:
     header='#include <telegacy.h>'
     if t.count(header)!=1:raise SystemExit("Missing response source include")
     t=t.replace(header,header+'\nextern bool concept98_enabled; // concept98_skip_hidden_thumbs_v112',1)
-# In all three history/search paths, skip *only* normal photo thumbnails.
+# In three history/search paths and their response retry chain, skip hidden photo thumbnails.
 # v11.1 full-photo pump processes all loaded photo docs from the same page.
 pat=re.compile(r'(?m)^(?P<indent>[\t ]*)get_photo\(\s*NULL,\s*&documents\[i\],\s*(?P<dc>&dcInfoMain|dcInfo)\s*\);')
 def fix(mt):
@@ -38,7 +38,7 @@ def fix(mt):
             +prefix+'    documents[i].photo_size!=1) continue;\n'
             +prefix+'get_photo(NULL,&documents[i],'+args+');')
 t,n=pat.subn(fix,t)
-if n!=3:raise SystemExit("Expected 3 response.cpp thumbnail loaders, found "+str(n))
+if n!=4:raise SystemExit("Expected 4 response.cpp thumbnail loaders, found "+str(n))
 m.write_text(s,encoding="latin-1",newline="\r\n")
 r.write_text(t,encoding="latin-1",newline="\r\n")
 print("v11.2: remove redundant small-photo requests for Concept98; retain video, sticker and legacy mode.")
