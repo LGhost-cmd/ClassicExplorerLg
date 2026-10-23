@@ -123,6 +123,9 @@ v112 = Path(__file__).resolve().with_name("patch_concept98_skip_hidden_thumbs_v1
 v113 = Path(__file__).resolve().with_name("patch_concept98_palette_stability_v113.py")
 v114 = Path(__file__).resolve().with_name("patch_concept98_avatar_dc_v114.py")
 v115 = Path(__file__).resolve().with_name("patch_concept98_webm_fallback_v115.py")
+v116 = Path(__file__).resolve().with_name("patch_concept98_no_phantom_media_v116.py")
+v117 = Path(__file__).resolve().with_name("patch_concept98_sticker_size_alpha_v117.py")
+v118 = Path(__file__).resolve().with_name("patch_concept98_typography_v118.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -171,6 +174,9 @@ for label, path in (
     ("v11.3", v113),
     ("v11.4", v114),
     ("v11.5", v115),
+    ("v11.6", v116),
+    ("v11.7", v117),
+    ("v11.8", v118),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -501,6 +507,27 @@ _chat_media_v66_subprocess.check_call(
     [
         sys.executable,
         str(Path(__file__).resolve().with_name("patch_concept98_webm_fallback_v115.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_no_phantom_media_v116.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_sticker_size_alpha_v117.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_typography_v118.py")),
         str(root),
     ]
 )
