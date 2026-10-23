@@ -627,9 +627,9 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
-_chat_media_v66_subprocess.check_call([sys.executable,str(v129),str(root)])
-_chat_media_v66_subprocess.check_call([sys.executable,str(v130),str(root)])
-_chat_media_v66_subprocess.check_call([sys.executable,str(v131),str(root)])
+_chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_nickname_hit_v129.py")),str(root)])
+_chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_forward_view_v130.py")),str(root)])
+_chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_album_grid_v131.py")),str(root)])
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
