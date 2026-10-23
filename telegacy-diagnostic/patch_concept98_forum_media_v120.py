@@ -23,7 +23,7 @@ def one(old,new,name):
 one('''    if(concept98_chat_detail &&
        IsWindowVisible(concept98_chat_detail)==shown)
         ShowWindow(concept98_chat_detail,shown?SW_HIDE:SW_SHOW);''',
-'''    // concept98_forum_media_v120: keep "Канал" as its own label.
+'''    // concept98_forum_media_v120: keep channel descriptor as its own label.
     if(concept98_chat_detail && !IsWindowVisible(concept98_chat_detail))
         ShowWindow(concept98_chat_detail,SW_SHOW);
     if(shown) SetWindowPos(concept98_topic_combo_v119,HWND_TOP,
