@@ -245,6 +245,23 @@ if s.count(anchor)==1:
         if(replying_msg_id)
             SendMessageW(hWnd,WM_COMMAND,MAKEWPARAM(7,0),0);
 ''',1)
+# User palette > literal off-white listbox. Use real Windows system colors
+# as the 1998 common controls did; selected row follows Highlight/HighlightText.
+old='''    COLORREF background = selected ?
+        RGB(39,75,115) : RGB(247,246,242);
+    COLORREF textcolor = selected ?
+        RGB(255,255,255) : RGB(34,36,39);'''
+new='''    // concept98_photo_reply_v123: no hard-coded white/off-white list.
+    COLORREF background = selected ?
+        GetSysColor(COLOR_HIGHLIGHT) : GetSysColor(COLOR_BTNFACE);
+    COLORREF textcolor = selected ?
+        GetSysColor(COLOR_HIGHLIGHTTEXT) : GetSysColor(COLOR_BTNTEXT);'''
+if s.count(old)!=1:raise SystemExit("v12.3 system list palette missing")
+s=s.replace(old,new,1)
+old='''        dc, selected ? textcolor : RGB(101,101,106)'''
+new='''        dc, selected ? textcolor : GetSysColor(COLOR_GRAYTEXT)'''
+if s.count(old)!=1:raise SystemExit("v12.3 list subtitle color missing")
+s=s.replace(old,new,1)
 p.write_text(s,encoding="latin-1",newline="\r\n")
 # Loading card inherits system chat surface rather than a fixed white page.
 old='''    FillRect(dc,&all,GetSysColorBrush(COLOR_WINDOW));
