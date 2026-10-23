@@ -114,6 +114,7 @@ v103 = Path(__file__).resolve().with_name("patch_concept98_photo_hit_v103.py")
 v104 = Path(__file__).resolve().with_name("patch_concept98_static_webp_identity_v104.py")
 v105 = Path(__file__).resolve().with_name("patch_concept98_clean_media_v105.py")
 v106 = Path(__file__).resolve().with_name("patch_concept98_media_recovery_v106.py")
+v107 = Path(__file__).resolve().with_name("patch_concept98_borrowed_icons_v107.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -153,6 +154,7 @@ for label, path in (
     ("v10.4", v104),
     ("v10.5", v105),
     ("v10.6", v106),
+    ("v10.7", v107),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -423,6 +425,13 @@ _chat_media_v66_subprocess.check_call(
         str(root),
     ]
 )
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_borrowed_icons_v107.py")),
+        str(root),
+    ]
+)
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
@@ -456,5 +465,5 @@ print(
     "v10.1 full photo disk cache, v10.2 original pixel art, v10.3 clicked OLE "
     "correction, v10.4 transaction-checked static WebP replacement, "
     "v10.5 clean photo loading and strict sticker geometry, "
-    "and v10.6 automatic full photos, retained avatars and safe WebM posters."
+    "v10.6 full photos/avatars/WebM posters and v10.7 archived Win98 icon assets."
 )
