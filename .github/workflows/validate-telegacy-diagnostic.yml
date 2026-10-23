@@ -100,6 +100,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_page_stage_v124.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_seamless_paging_v125.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_visibility_v126.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_readable_ui_v127.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -310,6 +311,9 @@ jobs:
           if ($runtime -notmatch "concept98_seamless_paging_v125") { throw "v12.5 seamless media paging patch missing" }
           if ($message -notmatch "v125 progressive JPEG eligible") { throw "v12.5 progressive JPEG fallback absent" }
           if ($message -notmatch "concept98_photo_visibility_v126") { throw "v12.6 photo visibility fix absent" }
+          if ($message -notmatch "concept98_readable_ui_v127") { throw "v12.7 two-sided chat missing" }
+          if ($runtime -notmatch "concept98_readable_ui_v127") { throw "v12.7 close process guard missing" }
+          if ($helpers -notmatch "concept98_readable_ui_v127") { throw "v12.7 notification and exit fix missing" }
           if ($message -match "(?m)^\s*Document document;") { throw "v12.6 uninitialised media Document still present" }
           if ($response -match "history_v86_restore_viewport\(\);") { throw "v12.5 duplicate viewport restore active" }
           if ($message -notmatch "concept98_cached_rendered_v124") { throw "v12.4 cache-first card registration missing" }
