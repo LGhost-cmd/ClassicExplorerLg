@@ -122,9 +122,9 @@ replacement='''    int sender_len = header ? wcslen(sender) : 0;
 	bool msghastext'''
 # The Python raw script intentionally uses double-backslash C++ unicode
 # escapes above only in its string literal; normalize them before writing.
-replacement=replacement.replace(r"\\\\x",r"\x")
-replacement=replacement.replace(r"\\\\n",r"\n")
-replacement=replacement.replace(r"\\\\r",r"\r")
+replacement=replacement.replace(r"\\x",r"\x")
+replacement=replacement.replace(r"\\n",r"\n")
+replacement=replacement.replace(r"\\r",r"\r")
 one("message",begin,replacement,"construct reply prefix before media")
 one("message",
 '''			msg[sender_len+1] = ' ';
