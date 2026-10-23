@@ -92,6 +92,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_no_phantom_media_v116.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_size_alpha_v117.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_typography_v118.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_forum_topics_v119.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -293,6 +294,9 @@ jobs:
           if ($message -notmatch "concept98_no_phantom_media_v116") { throw "v11.6 media ghost glyph correction absent" }
           if ($runtime -notmatch "concept98_sticker_size_alpha_v117") { throw "v11.7 unified sticker sizing absent" }
           if ($message -notmatch "concept98_typography_v118") { throw "v11.8 contrast-aware typography absent" }
+          if ($runtime -notmatch "concept98_forum_topics_v119") { throw "v11.9 forum selector missing" }
+          if ($helpers -notmatch "concept98_current_topic_v119") { throw "v11.9 topic history request missing" }
+          if ($response -notmatch "0x367617d3") { throw "v11.9 forum topics parser missing" }
           if ($helpers -notmatch "concept98_avatar_dc_v114") { throw "v11.4 media DC avatar routing absent" }
           if ($message -notmatch "concept98_photo_bind_v111") { throw "v11.1 photo tracking not registered on insertion" }
 
