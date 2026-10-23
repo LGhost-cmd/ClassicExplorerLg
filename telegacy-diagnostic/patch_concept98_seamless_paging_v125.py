@@ -58,7 +58,7 @@ new="""(size > size_main || size == 'w') && size != 'i' &&
                     (size != 'j' ||
                       (photosize_cons == 0xfa3efb95 &&
                        read_le(doc+offset+20,4)>0 &&
-                       read_le(doc+offset+20,4)<=64)) // v125 progressive JPEG eligible"""
+                       read_le(doc+offset+20,4)<=64)) /* v125 progressive JPEG eligible */"""
 once("message",old,new,"progressive JPEG photo size")
 
 # Record why new media may still be ineligible without making a guess about
