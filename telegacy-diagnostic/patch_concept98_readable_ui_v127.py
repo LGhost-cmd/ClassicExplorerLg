@@ -81,7 +81,7 @@ one("message",'''	PARAFORMAT2 pf;
 	pf.dwMask = PFM_ALIGNMENT;
 	pf.wAlignment = service ? PFA_CENTER : PFA_LEFT;
 	SendMessage(chat, EM_SETPARAFORMAT, 0, (LPARAM)&pf);''','''    // concept98_readable_ui_v127: outgoing right, incoming left.
-    PARAFORMAT2 pf={0};pf.cbSize=sizeof(pf);
+    PARAFORMAT2 pf;ZeroMemory(&pf,sizeof(pf));pf.cbSize=sizeof(pf);
     pf.dwMask=PFM_ALIGNMENT|PFM_STARTINDENT|PFM_RIGHTINDENT;
     RECT inner={0};GetClientRect(chat,&inner);
     int gutter=(inner.right-inner.left)*19/100;
@@ -110,13 +110,13 @@ one("message",'''	message.end_footer = message.end_char + written_info;
                   excerpt[span]!=L'\\n')span++;
             if(span>0){
                 SendMessage(chat,EM_SETSEL,beg,beg+span);
-                CHARFORMAT2 quote={0};quote.cbSize=sizeof(quote);
+                CHARFORMAT2 quote;ZeroMemory(&quote,sizeof(quote));quote.cbSize=sizeof(quote);
                 quote.dwMask=CFM_BACKCOLOR|CFM_ITALIC|CFM_COLOR;
                 quote.dwEffects=CFE_ITALIC;
                 quote.crBackColor=GetSysColor(COLOR_BTNFACE);
                 quote.crTextColor=GetSysColor(COLOR_BTNTEXT);
                 SendMessage(chat,EM_SETCHARFORMAT,SCF_SELECTION,(LPARAM)&quote);
-                PARAFORMAT2 inset={0};inset.cbSize=sizeof(inset);
+                PARAFORMAT2 inset;ZeroMemory(&inset,sizeof(inset));inset.cbSize=sizeof(inset);
                 inset.dwMask=PFM_OFFSET;
                 inset.dxOffset=MulDiv(10,1440,dpi);
                 SendMessage(chat,EM_SETPARAFORMAT,0,(LPARAM)&inset);
