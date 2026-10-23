@@ -99,17 +99,16 @@ static bool concept98_retry_cached_photo_v121() {
         if(!key)continue;
         std::map<unsigned __int64,DWORD>::iterator delay=failed_until.find(key);
         if(delay!=failed_until.end()&&(LONG)(now-delay->second)<0)continue;
-        std::vector<BYTE> jpeg;
-        if(!concept98_full_photo_load_v101(d,&jpeg))continue;
-        // Mark short retry cooldown in advance to prevent endless redraw.
-        failed_until[key]=now+1800;
         IUnknown* bound=concept98_photo_lookup_v111(d->id,d->access_hash);
         if(!bound)continue;
         int cp=media_chat_v87_find_identity_cp(bound);
         bound->Release();
-        if(cp<0)continue;
+        if(cp<0 || !media_chat_v87_exact_bitmap_at_cp(cp))continue;
+        // Touch disk / decode JPEG only after the original OLE is confirmed.
+        std::vector<BYTE> jpeg;
+        if(!concept98_full_photo_load_v101(d,&jpeg))continue;
+        failed_until[key]=now+12000; // failed swaps never generate busy redraw
         d->min=cp;d->max=cp+1;
-        if(!media_chat_v87_exact_bitmap_at_cp(cp))continue;
         // Decode from disk; NEVER fall back to a new network request here.
         // Apply only to this video's/photo's captured original OLE identity.
         HBITMAP decoded=jpg_to_bmp(&jpeg[0],(int)jpeg.size());
