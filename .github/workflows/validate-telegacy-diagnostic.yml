@@ -120,7 +120,7 @@ jobs:
           $procs = Get-Content "telegacy-src\src\procs.cpp" -Raw
           if ($message -notmatch "chat_media_resilience_v71") { throw "v7.1 message marker missing" }
           if ($message -notmatch "media_chat_ensure_line_start") { throw "v7.1 block-layout helper missing" }
-          if ($message -notmatch "stripped preview is a fallback") { throw "v7.1 stripped fallback missing" }
+          if ($message -notmatch "concept98_clean_media_v105: stripped preview is metadata only") { throw "v10.5 requires stripped JPEG to remain disabled" }
           if ($response -notmatch "response_handler_unsafe") { throw "v7.1 response boundary missing" }
           if ($response -notmatch "response v71 recovered parser exception") { throw "v7.1 crash recovery log missing" }
           if ($runtime -notmatch "dialog_rows_v72") { throw "v7.2 dialog cleanup marker missing" }
