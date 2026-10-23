@@ -78,6 +78,9 @@ static void concept98_forum_reset_v119(){
         SendMessageW(concept98_topic_combo_v119,CB_RESETCONTENT,0,0);
     if(msgInput && current_peer)
         EnableWindow(msgInput,current_peer->perm.cansendmsg);
+    if(hToolbar && current_peer)
+        EnableWindow(hToolbar,current_peer->perm.cansendmsg);
+    if(hMessageSearch)EnableWindow(hMessageSearch,TRUE);
     concept98_forum_visibility_v119();
 }
 static void concept98_forum_request_v119(){
@@ -205,6 +208,9 @@ static void concept98_forum_select_v119(){
     // Disable composer rather than silently writing to the wrong thread.
     if(msgInput)
         EnableWindow(msgInput,id==0 && current_peer->perm.cansendmsg);
+    if(hToolbar)
+        EnableWindow(hToolbar,id==0 && current_peer->perm.cansendmsg);
+    if(hMessageSearch)EnableWindow(hMessageSearch,id==0);
     if(media_chat_full_photo_active)media_chat_full_photo_reset(true);
     message_search_clear_chat_view();
     InterlockedExchange(&history_request_pending,0);
