@@ -70,7 +70,7 @@ one("helpers",'''void exit_telegacy() {
 }''',"synchronous quit")
 one("telegacy",'''	case WM_CLOSE:
 		if (CLOSETOTRAY) {''','''	case WM_CLOSE:
-        // v127: the X closes the app in Concept98, not merely its window.
+        // concept98_readable_ui_v127: the X closes the app in Concept98.
         if(concept98_enabled){exit_telegacy();return 0;}
 		if (CLOSETOTRAY) {''',"classic close command")
 
