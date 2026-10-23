@@ -101,6 +101,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_seamless_paging_v125.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_visibility_v126.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_readable_ui_v127.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_chat_polish_v128.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -312,6 +313,9 @@ jobs:
           if ($message -notmatch "v125 progressive JPEG eligible") { throw "v12.5 progressive JPEG fallback absent" }
           if ($message -notmatch "concept98_photo_visibility_v126") { throw "v12.6 photo visibility fix absent" }
           if ($message -notmatch "concept98_readable_ui_v127") { throw "v12.7 two-sided chat missing" }
+          if ($message -notmatch "concept98_chat_polish_v128") { throw "v12.8 chat font/quote formatting missing" }
+          if ($runtime -notmatch "concept98_drag_relayout_v128") { throw "v12.8 drag layout missing" }
+          if ($procs -notmatch "concept98_drag_relayout_v128") { throw "v12.8 splitter drag missing" }
           if ($runtime -notmatch "concept98_readable_ui_v127") { throw "v12.7 close process guard missing" }
           if ($helpers -notmatch "concept98_readable_ui_v127") { throw "v12.7 notification and exit fix missing" }
           if ($message -match "(?m)^\s*Document document;") { throw "v12.6 uninitialised media Document still present" }
