@@ -96,6 +96,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_forum_media_v120.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_forum_search_cached_photo_v121.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_ui_finish_v122.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_photo_reply_v123.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -301,6 +302,8 @@ jobs:
           if ($runtime -notmatch "concept98_forum_media_v120") { throw "v12.0 visible topic selection / media click safety missing" }
           if ($runtime -notmatch "concept98_forum_search_cached_photo_v121") { throw "v12.1 cached JPEG and search recovery missing" }
           if ($runtime -notmatch "concept98_ui_finish_v122") { throw "v12.2 native UI search alignment missing" }
+          if ($runtime -notmatch "concept98_photo_reply_v123") { throw "v12.3 cache and reply UI patch missing" }
+          if ($message -notmatch "v123 use Telegacy") { throw "v12.3 themed placeholder absent" }
           if ($helpers -notmatch "concept98_ui_finish_v122") { throw "v12.2 classic notification skin missing" }
           if ($runtime -notmatch "static sticker click ignored") { throw "v12.0 WebM sticker click guard missing" }
           if ($helpers -notmatch "concept98_current_topic_v119") { throw "v11.9 topic history request missing" }
