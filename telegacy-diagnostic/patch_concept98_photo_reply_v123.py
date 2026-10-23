@@ -205,17 +205,17 @@ s=s.replace(anchor,anchor+'''
 ''',1)
 # Reply start, cancel and after-send all share the same visible update.
 replace_once(
-'''        case 7: {
-            replying_msg_id = 0;''',
-'''        case 7: {
-            replying_msg_id = 0;
-            PostMessageW(hWnd,WM_APP+0x397,0,0);''',"cancel native reply context")
+'''\t\tcase 7: {
+\t\t\treplying_msg_id = 0;''',
+'''\t\tcase 7: {
+\t\t\treplying_msg_id = 0;
+\t\t\tPostMessageW(hWnd,WM_APP+0x397,0,0);''',"cancel native reply context")
 replace_once(
-'''        case 23: {
-            replying_msg_id = sel_msg_id;''',
-'''        case 23: {
-            replying_msg_id = sel_msg_id;
-            PostMessageW(hWnd,WM_APP+0x397,0,0);''',"create native reply context")
+'''\t\tcase 23: {
+\t\t\treplying_msg_id = sel_msg_id;''',
+'''\t\tcase 23: {
+\t\t\treplying_msg_id = sel_msg_id;
+\t\t\tPostMessageW(hWnd,WM_APP+0x397,0,0);''',"create native reply context")
 # If an active reply is cleared by normal send, WM_COMMAND(7) already triggers
 # the preview update. Do not store mutable message content on foreign threads.
 anchor='''    if (msg == WM_COMMAND && concept98_enabled &&
