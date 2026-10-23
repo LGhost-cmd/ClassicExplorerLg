@@ -12,6 +12,7 @@ t=root/"src"/"telegacy.cpp"
 m=root/"src"/"message.cpp"
 r=root/"src"/"response.cpp"
 s=t.read_text(encoding="latin-1")
+if "#include <algorithm>" not in s:s="#include <algorithm>\n"+s
 a=m.read_text(encoding="latin-1")
 b=r.read_text(encoding="latin-1")
 if "concept98_page_stage_v124" in s: raise SystemExit(0)
