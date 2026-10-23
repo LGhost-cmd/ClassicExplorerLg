@@ -79,6 +79,8 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_static_webp_identity_v104.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_clean_media_v105.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_media_recovery_v106.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_borrowed_icons_v107.py"
+          python -m py_compile "telegacy-diagnostic\bundle_win98_icons.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -270,6 +272,7 @@ jobs:
           if ($runtime -notmatch "concept98_clean_media_v105") { throw "v10.5 exact sticker geometry policy missing" }
           if ($runtime -notmatch "concept98_auto_full_photo_pump_v106") { throw "v10.6 automatic full media missing" }
           if ($helpers -notmatch "concept98_cache_v96.size\(\)<1024") { throw "v10.6 avatar capacity missing" }
+          if ($runtime -notmatch "concept98_asset_icon_v107") { throw "v10.7 genuine icon loader missing" }
 
       - name: Concept 98 offline regression contracts
         shell: pwsh
