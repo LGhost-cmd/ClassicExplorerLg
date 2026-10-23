@@ -298,7 +298,7 @@ h=one(h,'''    convert_message(
 "forum history RPC identity")
 h=h.replace("#include <telegacy.h>","#include <telegacy.h>\nextern int concept98_current_topic_v119();\nextern void concept98_note_topic_history_rpc_v119(const BYTE*);",1)
 helpers.write_text(h,encoding="latin-1",newline="\r\n")
-r=r.replace("#include <telegacy.h>","#include <telegacy.h>\nextern bool concept98_forum_receive_v119(const BYTE*,BYTE*,int);\nextern bool concept98_accept_topic_history_v119(const BYTE*);",1)
+r=r.replace("#include <telegacy.h>","#include <telegacy.h>\nextern bool concept98_forum_receive_v119(const BYTE*,BYTE*,int);\nextern bool concept98_accept_topic_history_v119(const BYTE*);\nextern int concept98_current_topic_v119();",1)
 r=one(r,'''    case 0x5f206716: // messages.messagesSlice (newer)''',
 '''    case 0x367617d3: { // concept98 v119: messages.forumTopics
         concept98_forum_receive_v119(last_rpcresult_msgid,
@@ -307,6 +307,11 @@ r=one(r,'''    case 0x5f206716: // messages.messagesSlice (newer)''',
     }
     case 0x5f206716: // messages.messagesSlice (newer)''',
 "forumTopics response")
+# Empty forum threads must never remove the entire peer from chat roster.
+r=one(r,
+    "if (count == 0 && messages.size() == 0 && current_peer != NULL) {",
+    "if (count == 0 && messages.size() == 0 && current_peer != NULL && concept98_current_topic_v119()==0) {",
+    "empty topic must not remove peer")
 r=one(r,'''        int offset_msg = 12;
         if (constructor != 0x8c718e87) {''',
 '''        if(!concept98_accept_topic_history_v119(last_rpcresult_msgid)){
