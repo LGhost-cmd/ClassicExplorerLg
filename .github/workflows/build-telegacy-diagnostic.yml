@@ -231,7 +231,7 @@ jobs:
           Copy-Item "telegacy-src\src\message.cpp" artifact\message-diag.cpp -Force
 
           @"
-          Telegacy Concept 98 v10.4 (Win32 x86) - native working client
+          Telegacy Concept 98 v10.5 (Win32 x86) - native working client
           ===================================================
 
           Run Telegacy-Concept98.exe from this extracted folder.
@@ -253,11 +253,11 @@ jobs:
           This build deliberately DOES NOT log message bodies, phone numbers,
           authentication tokens, passwords, or session.dat contents.
           "@ | Set-Content artifact\HOW_TO_TEST.txt -Encoding UTF8
-          "Concept98 v10.4 - commit $env:GITHUB_SHA" | Set-Content artifact\BUILDINFO.txt -Encoding UTF8
+          "Concept98 v10.5 - commit $env:GITHUB_SHA" | Set-Content artifact\BUILDINFO.txt -Encoding UTF8
 
       - name: Upload diagnostic artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Telegacy-Concept98-v10.4-x86
+          name: Telegacy-Concept98-v10.5-x86
           path: artifact
           if-no-files-found: error
