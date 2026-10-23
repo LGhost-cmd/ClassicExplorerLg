@@ -131,6 +131,7 @@ v120 = Path(__file__).resolve().with_name("patch_concept98_forum_media_v120.py")
 v121 = Path(__file__).resolve().with_name("patch_concept98_forum_search_cached_photo_v121.py")
 v122 = Path(__file__).resolve().with_name("patch_concept98_ui_finish_v122.py")
 v123 = Path(__file__).resolve().with_name("patch_concept98_photo_reply_v123.py")
+v124 = Path(__file__).resolve().with_name("patch_concept98_page_stage_v124.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -187,6 +188,7 @@ for label, path in (
     ("v12.1", v121),
     ("v12.2", v122),
     ("v12.3", v123),
+    ("v12.4", v124),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -573,6 +575,13 @@ _chat_media_v66_subprocess.check_call(
     [
         sys.executable,
         str(Path(__file__).resolve().with_name("patch_concept98_photo_reply_v123.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_page_stage_v124.py")),
         str(root),
     ]
 )
