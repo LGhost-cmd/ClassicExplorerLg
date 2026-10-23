@@ -67,6 +67,19 @@ def main(root):
             "WebP thumbnail has lost ownership-safe decoder")
     require("WebPFree(owned_rgba)" not in response,
             "Double-free reintroduced in WebP decoding")
+    message=(root/"src"/"message.cpp").read_text(encoding="latin-1")
+    require("concept98_clean_media_v105" in message,
+            "Clean full-quality chat photo policy missing")
+    require("if (size == 'i' && IMAGELOADPOLICY)" not in message,
+            "Telegram low-resolution stripped photo preview re-enabled")
+    require("Full quality  |  Click to retry" in message,
+            "Loading card lost its neutral fallback UI")
+    require("concept98_clean_media_v105" in timer,
+            "Fresh RichEdit geometry requirement missing")
+    require("origin.x -=" not in timer and "origin.y -=" not in timer,
+            "Sticker overlay may still extrapolate an old scroll position")
+    require("bool inferred_geometry = false;" in timer,
+            "Sticker runtime can animate without verified OLE position")
     results.append("Photos: exact OLE identity, bounded decoding, one buffer owner")
 
     require("typedef std::pair<int, __int64> ConceptAvatar96Key;" in helpers,
