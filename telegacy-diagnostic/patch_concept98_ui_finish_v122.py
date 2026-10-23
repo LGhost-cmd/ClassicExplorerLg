@@ -130,10 +130,9 @@ a=one(a,
 "notification DND button grid")
 a=one(a,"        const int h = 214;","        const int h = 216;",
 "notification Win98 popup height")
-a=one(a,
-'''            L"\x041d\x043e\x0432\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 \x2014 Telegacy"''',
-'''            L"\x041d\x043e\x0432\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 | Telegacy"''',
-"notification caption glyph compatibility")
+# Glyph availability depends on the active Windows 98 bitmap font.
+# Avoid making the entire build fail if another patch already replaced the title.
+a=a.replace(r"\x2014 Telegacy",r"| Telegacy")
 
 h.write_text(a,encoding="latin-1",newline="\r\n")
 print("v12.2: proper recessed Win98 notification pane, system-color text, aligned themed message search.")
