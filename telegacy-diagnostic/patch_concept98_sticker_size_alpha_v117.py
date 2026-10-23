@@ -126,6 +126,18 @@ static HBITMAP concept98_normalize_sticker_v117(HBITMAP incoming) {
 }
 '''
 s=s.replace(sig,helpers+"\n"+sig,1)
+# The old Lottie first-frame renderer composited onto Windows white before
+# normalization. Use the active chat palette for genuinely transparent pixels.
+first=s.find("static HBITMAP concept98_sticker_first_tgs_v109(")
+last=s.find("static HBITMAP concept98_shell_webm_poster_v115(",first)
+if last<0:last=s.find("static HBITMAP concept98_sticker_first_webm_v109(",first)
+if first<0 or last<0:raise SystemExit("TGS bounds missing")
+part=s[first:last]
+old="COLORREF bg=GetSysColor(COLOR_WINDOW);"
+if part.count(old)!=1:raise SystemExit("TGS compositing changed")
+part=part.replace(old,"COLORREF bg=colors[1]; // concept98_sticker_size_alpha_v117",1)
+s=s[:first]+part+s[last:]
+
 old=r'''        HBITMAP first=kind==1
             ? concept98_sticker_first_tgs_v109(document,path)
             : concept98_sticker_first_webm_v109(path);
