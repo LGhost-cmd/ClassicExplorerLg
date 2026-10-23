@@ -102,6 +102,9 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_visibility_v126.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_readable_ui_v127.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_chat_polish_v128.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_nickname_hit_v129.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_forward_view_v130.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_album_grid_v131.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -314,6 +317,10 @@ jobs:
           if ($message -notmatch "concept98_photo_visibility_v126") { throw "v12.6 photo visibility fix absent" }
           if ($message -notmatch "concept98_readable_ui_v127") { throw "v12.7 two-sided chat missing" }
           if ($message -notmatch "concept98_chat_polish_v128") { throw "v12.8 chat font/quote formatting missing" }
+          if ($procs -notmatch "concept98_nickname_hit_v129") { throw "v12.9 precise nickname hit missing" }
+          if ($runtime -notmatch "concept98_forward_hit_v130") { throw "v13.0 forward popup handling missing" }
+          if ($message -notmatch "concept98_forward_view_v130") { throw "v13.0 forward link missing" }
+          if ($message -notmatch "concept98_album_grid_v131") { throw "v13.1 two-column OLE album missing" }
           if ($runtime -notmatch "concept98_drag_relayout_v128") { throw "v12.8 drag layout missing" }
           if ($procs -notmatch "concept98_drag_relayout_v128") { throw "v12.8 splitter drag missing" }
           if ($runtime -notmatch "concept98_readable_ui_v127") { throw "v12.7 close process guard missing" }
