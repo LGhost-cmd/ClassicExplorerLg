@@ -211,6 +211,6 @@ s=s.replace(needle,r'''    if (kind==1 || kind==2) {
 
 '''+needle,1)
 if "#include <mfreadwrite.h>" not in s:
-    s='#include <mfreadwrite.h>\n#pragma comment(lib, "mfreadwrite.lib")\n'+s
+    s='#include <mfapi.h>\n#include <mfidl.h>\n#include <mfreadwrite.h>\n#pragma comment(lib, "mfplat.lib")\n#pragma comment(lib, "mfreadwrite.lib")\n#pragma comment(lib, "mfuuid.lib")\n'+s
 p.write_text(s,encoding="latin-1",newline="\r\n")
 print("v10.9: TGS frame 0 and Media Foundation WebM first frame committed as static OLE; no child video windows.")
