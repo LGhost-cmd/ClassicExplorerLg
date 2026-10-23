@@ -119,6 +119,7 @@ v108 = Path(__file__).resolve().with_name("patch_concept98_cache_first_v108.py")
 v109 = Path(__file__).resolve().with_name("patch_concept98_sticker_first_frame_v109.py")
 v110 = Path(__file__).resolve().with_name("patch_concept98_shell_polish_v110.py")
 v111 = Path(__file__).resolve().with_name("patch_concept98_photo_ole_identity_v111.py")
+v112 = Path(__file__).resolve().with_name("patch_concept98_skip_hidden_thumbs_v112.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -163,6 +164,7 @@ for label, path in (
     ("v10.9", v109),
     ("v11.0", v110),
     ("v11.1", v111),
+    ("v11.2", v112),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -465,6 +467,13 @@ _chat_media_v66_subprocess.check_call(
     [
         sys.executable,
         str(Path(__file__).resolve().with_name("patch_concept98_photo_ole_identity_v111.py")),
+        str(root),
+    ]
+)
+_chat_media_v66_subprocess.check_call(
+    [
+        sys.executable,
+        str(Path(__file__).resolve().with_name("patch_concept98_skip_hidden_thumbs_v112.py")),
         str(root),
     ]
 )
