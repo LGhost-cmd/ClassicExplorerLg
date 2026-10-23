@@ -143,7 +143,7 @@ t=t[:end]+scanner+t[end:]
 # std::map is already used by helpers.cpp, but telegacy.cpp has a separate
 # translation unit and must include the standard header explicitly.
 if "#include <map>" not in t:
-    t="#include <map>\\n".replace("\\\\n","\\n")+t
+    t="#include <map>\n"+t
 # This 240ms timer was introduced in v9.9 for avatar scheduling.
 tick="""    if (msg == WM_TIMER && wParam == 8998) {
         if (concept98_enabled && dcInfoMain.ready)
