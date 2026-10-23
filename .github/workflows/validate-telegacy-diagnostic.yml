@@ -254,7 +254,7 @@ jobs:
           if ($runtime -notmatch "concept98_badge_hash_v91") { throw "v9.1 stable unread repaint missing" }
           if ($runtime -notmatch "concept98_move_v91") { throw "v9.1 change-only RichEdit layout missing" }
           if ($runtime -notmatch "hMessageSearchStatus") { throw "v9.1 search toolbar integration missing" }
-          if ($helpers -notmatch "concept98 v91 new-message popup displayed") { throw "v9.1 notification styling missing" }
+          if ($helpers -notmatch "concept98 v127 popup visible sender_chars") { throw "v12.7 readable notification renderer missing" }
           if ($runtime -notmatch "concept98_interactions_v92") { throw "v9.2 interactions missing" }
           if ($runtime -notmatch "concept98_divider_proc_v92") { throw "v9.2 draggable sidebar missing" }
           if ($runtime -notmatch "sidebar_width") { throw "v9.2 sidebar persistence missing" }
