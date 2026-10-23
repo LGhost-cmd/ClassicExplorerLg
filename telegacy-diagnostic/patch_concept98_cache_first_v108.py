@@ -21,16 +21,16 @@ extra=r'''
 // concept98_cache_first_v108: load the verified full JPEG BEFORE inserting
 // this message's RichEdit OLE, never guess another object's text position.
 static HBITMAP concept98_cached_photo_card_v108(const Document* document) {
-    if (!document || !read_le(document->id,8) ||
-        !read_le(document->access_hash,8) || !appdata_path[0])
+    if (!document || !read_le((BYTE*)document->id,8) ||
+        !read_le((BYTE*)document->access_hash,8) || !appdata_path[0])
         return NULL;
     wchar_t path[MAX_PATH]={0};
     _snwprintf_s(path,ARRAYSIZE(path),_TRUNCATE,
         L"%s\\photo_cache98\\%016I64X-%016I64X-%016I64X.jpg",
         appdata_path,
         (unsigned __int64)read_le(myself.id,8),
-        (unsigned __int64)read_le(document->id,8),
-        (unsigned __int64)read_le(document->access_hash,8));
+        (unsigned __int64)read_le((BYTE*)document->id,8),
+        (unsigned __int64)read_le((BYTE*)document->access_hash,8));
     FILE* file=_wfopen(path,L"rb");
     if (!file) return NULL;
     _fseeki64(file,0,SEEK_END);
