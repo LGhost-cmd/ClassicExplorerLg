@@ -126,6 +126,17 @@ new='''    if (replaced) {
             "chat v87 full photo replaced exact captured=%d old=%d new=%d",'''
 if part.count(old)!=1:raise SystemExit("Replacement completion missing")
 s=s[:start]+part.replace(old,new,1)+s[end:]
+# The v10.6 page-wide scanner must accept photos whose document cp has drifted,
+# since the per-photo OLE binding is the authoritative source.
+old_scan='''        if (!media_chat_v87_exact_bitmap_at_cp(d->min)) continue;'''
+new_scan=r'''        IUnknown* bound=concept98_photo_lookup_v111(
+            d->id,d->access_hash);
+        int stable_cp=bound ? media_chat_v87_find_identity_cp(bound) : -1;
+        if(bound)bound->Release();
+        if(stable_cp>=0){d->min=stable_cp;d->max=stable_cp+1;}
+        else if(!media_chat_v87_exact_bitmap_at_cp(d->min))continue;'''
+if s.count(old_scan)!=1:raise SystemExit("v11.1 expected scanner guard missing")
+s=s.replace(old_scan,new_scan,1)
 hook='        media_chat_v86_loaded_full_instances.clear();'
 if s.count(hook)!=1:raise SystemExit("No chat-switch bindings cleanup")
 s=s.replace(hook,hook+'\n        concept98_photo_clear_bindings_v111();',1)
