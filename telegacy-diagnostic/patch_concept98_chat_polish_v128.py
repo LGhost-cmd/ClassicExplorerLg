@@ -58,7 +58,7 @@ one("message",old,new,"compact conversation paragraph columns")
 # the extra text is accounted for in header_len BEFORE RichEdit message
 # insertion, so every tracked OLE Document and subsequent Message CP shifts
 # by the proper amount and no separate controls overlap media.
-begin='''    int sender_len = header ? wcslen(sender) : 0;
+begin='''\tint sender_len = header ? wcslen(sender) : 0;
 	int header_len = header ? (sender_len + ((current_peer->perm.cansendmsg || msg_len == 0) ? 2 : 3)) : 0;
 	bool msghastext'''
 replacement='''    int sender_len = header ? wcslen(sender) : 0;
@@ -122,9 +122,9 @@ replacement='''    int sender_len = header ? wcslen(sender) : 0;
 	bool msghastext'''
 # The Python raw script intentionally uses double-backslash C++ unicode
 # escapes above only in its string literal; normalize them before writing.
-replacement=replacement.replace(r"\\x",r"\x")
-replacement=replacement.replace(r"\\n",r"\n")
-replacement=replacement.replace(r"\\r",r"\r")
+replacement=replacement.replace(r"\\\\x",r"\x")
+replacement=replacement.replace(r"\\\\n",r"\n")
+replacement=replacement.replace(r"\\\\r",r"\r")
 one("message",begin,replacement,"construct reply prefix before media")
 one("message",
 '''			msg[sender_len+1] = ' ';
