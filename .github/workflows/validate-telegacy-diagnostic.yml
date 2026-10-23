@@ -85,6 +85,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_first_frame_v109.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_shell_polish_v110.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_ole_identity_v111.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_skip_hidden_thumbs_v112.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
