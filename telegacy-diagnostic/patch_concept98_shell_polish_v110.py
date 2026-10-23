@@ -104,7 +104,7 @@ one('HPEN pen = CreatePen(PS_SOLID, 1, GetSysColor(COLOR_3DLIGHT));',
     'list dividers')
 # Stable 98-era caption, no large pseudo-brand occupying the chat pane.
 one('L"Telegacy 98  |  Telegram Client"',
-    'L"Telegacy 98   |   Переписка"',
+    r'L"Telegacy 98   |   \x041F\x0435\x0440\x0435\x043F\x0438\x0441\x043A\x0430"',
     'chat caption')
 p.write_text(s,encoding="latin-1",newline="\r\n")
 print("v11.0 warm Win98 Explorer shell: calmer chat paper, classic unread bevels, better split width, compact sidebar.")
