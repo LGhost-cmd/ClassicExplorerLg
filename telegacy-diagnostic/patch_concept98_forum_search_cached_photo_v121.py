@@ -110,11 +110,16 @@ static bool concept98_retry_cached_photo_v121() {
         if(cp<0)continue;
         d->min=cp;d->max=cp+1;
         if(!media_chat_v87_exact_bitmap_at_cp(cp))continue;
-        // The action uses cache first and calls the transactional
-        // media_chat_upgrade_photo_in_place; it will not request new bytes
-        // when the local cached JPEG commits successfully.
-        bool success=media_chat_full_photo_user_action(d,false);
-        if(success && media_chat_v81_photo_is_full(d)){
+        // Decode from disk; NEVER fall back to a new network request here.
+        // Apply only to this video's/photo's captured original OLE identity.
+        HBITMAP decoded=jpg_to_bmp(&jpeg[0],(int)jpeg.size());
+        if(!decoded)continue;
+        bool captured=media_chat_v87_capture_photo_ole(d);
+        bool replaced=captured &&
+            media_chat_upgrade_photo_in_place(d,decoded);
+        DeleteObject(decoded);
+        if(replaced){
+            media_chat_v81_mark_photo_full(d);
             failed_until.erase(key);
             diag_log("concept98 v121 late cached JPEG OLE recovered id=%I64u cp=%d",
                      id,cp);
