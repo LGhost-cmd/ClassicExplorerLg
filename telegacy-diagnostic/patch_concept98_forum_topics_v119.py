@@ -227,7 +227,8 @@ s=one(s,
 '''    concept98_move_v91(concept98_chat_detail, content_x+46, 57,
                        title_w-46, 17);
     concept98_move_v91(concept98_topic_combo_v119,
-                       content_x+46, 54, title_w-46, 240);''',
+                       content_x+46, 54, title_w-46, 240);
+    concept98_forum_visibility_v119();''',
 "forum layout")
 s=one(s,
 '''    concept98_chat_detail = CreateWindowW(
