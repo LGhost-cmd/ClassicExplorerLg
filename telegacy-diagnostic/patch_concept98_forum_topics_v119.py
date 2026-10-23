@@ -252,13 +252,13 @@ s=one(s,
         wchar_t oldname[256] = {0};''',
 "sidebar topic visibility synchronization")
 # Peer change fetches forum topics once; nonforum peers keep ordinary label.
-s=one(s,'''            current_peer = selected_peer;
-            media_archive_clear();''',
+s=one(s,'''\t\t\tcurrent_peer = selected_peer;
+\t\t\tmedia_archive_clear();''',
 '''            current_peer = selected_peer;
             concept98_forum_request_v119();
             media_archive_clear();''',
 "forum peer change")
-s=one(s,'''        case 3004: { // media archive''',
+s=one(s,'''\t\tcase 3004: { // media archive''',
 '''        case 8999: { // concept98 v119 real forum topic choice
             if(HIWORD(wParam)==CBN_SELCHANGE)
                 concept98_forum_select_v119();
