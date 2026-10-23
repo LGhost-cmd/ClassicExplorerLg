@@ -119,5 +119,21 @@ a=one(a,
 '''            200, 117, 158, 28, hDlg, (HMENU)2, NULL, NULL''',
 '''            200, 122, 158, 28, hDlg, (HMENU)2, NULL, NULL''',
 "notification open button")
+# Keep the native Win98 popup compact and align the v9.3 extra controls.
+a=one(a,
+'''            54, 150, 110, 24, hDlg,(HMENU)3,NULL,NULL''',
+'''            54, 158, 139, 26, hDlg,(HMENU)3,NULL,NULL''',
+"notification hide button grid")
+a=one(a,
+'''            172,150,186,24,hDlg,(HMENU)4,NULL,NULL''',
+'''            200,158,158,26,hDlg,(HMENU)4,NULL,NULL''',
+"notification DND button grid")
+a=one(a,"        const int h = 214;","        const int h = 216;",
+"notification Win98 popup height")
+a=one(a,
+'''            L"\x041d\x043e\x0432\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 \x2014 Telegacy"''',
+'''            L"\x041d\x043e\x0432\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 | Telegacy"''',
+"notification caption glyph compatibility")
+
 h.write_text(a,encoding="latin-1",newline="\r\n")
 print("v12.2: proper recessed Win98 notification pane, system-color text, aligned themed message search.")
