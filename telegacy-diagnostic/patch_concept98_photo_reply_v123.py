@@ -54,13 +54,11 @@ replace_once(
 # A successful RichEdit insert may not be redrawn when drawchat==false,
 # causing the old Loading image card to remain visibly stuck.
 replace_once(
-'''    if (replaced) {
-        diag_log(
+'''        diag_log(
             "chat v87 full photo replaced exact captured=%d old=%d new=%d",''',
-'''    if (replaced) {
-        // concept98_photo_reply_v123: invalidate even with drawchat=false.
-        // The old rendering could still show Loading image after an
-        // exact OLE substitution had already returned success.
+'''        // concept98_photo_reply_v123: invalidate even with drawchat=false.
+        // RichEdit could show a stale Loading image card after the real
+        // bitmap OLE had already replaced it.
         InvalidateRect(chat,NULL,FALSE);
         if(IsWindowVisible(chat))UpdateWindow(chat);
         diag_log(
