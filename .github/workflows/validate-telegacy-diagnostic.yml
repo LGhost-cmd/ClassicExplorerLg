@@ -81,6 +81,9 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_media_recovery_v106.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_borrowed_icons_v107.py"
           python -m py_compile "telegacy-diagnostic\bundle_win98_icons.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_cache_first_v108.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_sticker_first_frame_v109.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_shell_polish_v110.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -273,6 +276,9 @@ jobs:
           if ($runtime -notmatch "concept98_auto_full_photo_pump_v106") { throw "v10.6 automatic full media missing" }
           if ($helpers -notmatch "concept98_cache_v96.size\(\)<1024") { throw "v10.6 avatar capacity missing" }
           if ($runtime -notmatch "concept98_asset_icon_v107") { throw "v10.7 genuine icon loader missing" }
+          if ($runtime -notmatch "concept98_sticker_first_frame_v109") { throw "v10.9 first-frame decoding missing" }
+          if ($runtime -notmatch "concept98_shell_polish_v110") { throw "v11.0 Win98 shell polish missing" }
+          if ($message -notmatch "concept98_cache_first_v108") { throw "v10.8 cache-first photo renderer missing" }
 
       - name: Concept 98 offline regression contracts
         shell: pwsh
