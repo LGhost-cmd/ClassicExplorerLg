@@ -98,6 +98,7 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_ui_finish_v122.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_photo_reply_v123.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_page_stage_v124.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_seamless_paging_v125.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -305,6 +306,9 @@ jobs:
           if ($runtime -notmatch "concept98_ui_finish_v122") { throw "v12.2 native UI search alignment missing" }
           if ($runtime -notmatch "concept98_photo_reply_v123") { throw "v12.3 cache and reply UI patch missing" }
           if ($runtime -notmatch "concept98_page_stage_v124") { throw "v12.4 staged media history missing" }
+          if ($runtime -notmatch "concept98_seamless_paging_v125") { throw "v12.5 seamless media paging patch missing" }
+          if ($message -notmatch "v125 progressive JPEG eligible") { throw "v12.5 progressive JPEG fallback absent" }
+          if ($response -match "history_v86_restore_viewport\(\);") { throw "v12.5 duplicate viewport restore active" }
           if ($message -notmatch "concept98_cached_rendered_v124") { throw "v12.4 cache-first card registration missing" }
           if ($response -notmatch "concept98_page_stage_v124") { throw "v12.4 page staging call absent" }
           if ($message -notmatch "v123 use Telegacy") { throw "v12.3 themed placeholder absent" }
