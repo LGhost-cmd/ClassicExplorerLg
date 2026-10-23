@@ -72,7 +72,7 @@ def main(root):
             "Clean full-quality chat photo policy missing")
     require("if (size == 'i' && IMAGELOADPOLICY)" not in message,
             "Telegram low-resolution stripped photo preview re-enabled")
-    require("Full quality  |  Click to retry" in message,
+    require("Full quality  |  Loading..." in message,
             "Loading card lost its neutral fallback UI")
     require("concept98_clean_media_v105" in timer,
             "Fresh RichEdit geometry requirement missing")
