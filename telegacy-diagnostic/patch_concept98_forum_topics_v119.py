@@ -25,7 +25,7 @@ def one(source,old,new,name):
 # Peer-driven control, never a fake selector in non-forum channels.
 s=one(s,
     "static HWND concept98_chat_detail = NULL;",
-    "static HWND concept98_chat_detail = NULL;\nstatic HWND concept98_topic_combo_v119 = NULL; // concept98_forum_topics_v119",
+    "static HWND concept98_chat_detail = NULL;\nstatic HWND concept98_topic_combo_v119 = NULL; // concept98_forum_topics_v119\nstatic void concept98_forum_visibility_v119();",
     "topic combo declaration")
 anchor="static void concept98_apply_layout(HWND hwnd) {"
 network=r'''
