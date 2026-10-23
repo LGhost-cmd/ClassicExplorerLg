@@ -19,12 +19,12 @@ def once(old,new,label):
 
 # Parse the already existing Telegram grouped_id without adding characters or
 # changing the Telegram envelope. A different group or single message resets.
-needle='''void message_adder(bool service, bool to_front, int flags, BYTE* msg_id, BYTE* msg_bytes, EDITSTREAM* es, BYTE* chat_member_id, std::vector<int>* format_vecs, BYTE* reactions, BYTE* msgrpl, BYTE* msgfwd, BYTE* views, bool groupmed_end, bool footer, bool editing, int date) {'''
+needle='''int message_handler(bool to_front, BYTE* message, bool update_order, bool editing, bool rplhelper) {'''
 replacement='''// concept98_album_grid_v131: source group id and parity for live messages.
 static unsigned __int64 concept98_album_id_v131=0;
 static BYTE concept98_album_peer_v131[8]={0};
 static int concept98_album_slot_v131=-1;
-void message_adder(bool service, bool to_front, int flags, BYTE* msg_id, BYTE* msg_bytes, EDITSTREAM* es, BYTE* chat_member_id, std::vector<int>* format_vecs, BYTE* reactions, BYTE* msgrpl, BYTE* msgfwd, BYTE* views, bool groupmed_end, bool footer, bool editing, int date) {'''
+int message_handler(bool to_front, BYTE* message, bool update_order, bool editing, bool rplhelper) {'''
 once(needle,replacement,"declare group ordinal")
 # Grouped-id is available in message_handler before offset_msg += 8.
 needle='''	if (flags_msg & (1 << 17)) {
