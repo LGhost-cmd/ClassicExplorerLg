@@ -94,19 +94,19 @@ r'''            if(!copied){
                                 HDC screen=GetDC(NULL);
                                 HDC src=CreateCompatibleDC(screen);
                                 HDC dst=CreateCompatibleDC(screen);
-                                HBITMAP small=CreateCompatibleBitmap(screen,w,h);
-                                if(src && dst && small){
+                                HBITMAP reduced_bitmap=CreateCompatibleBitmap(screen,w,h);
+                                if(src && dst && reduced_bitmap){
                                     HGDIOBJ a=SelectObject(src,decoded);
-                                    HGDIOBJ b=SelectObject(dst,small);
+                                    HGDIOBJ b=SelectObject(dst,reduced_bitmap);
                                     SetStretchBltMode(dst,HALFTONE);
                                     if(StretchBlt(dst,0,0,w,h,src,0,0,
                                                   width,height,SRCCOPY)){
-                                        insert_image(c.rich,NULL,small);
+                                        insert_image(c.rich,NULL,reduced_bitmap);
                                         cached_photo=true;
                                     }
                                     SelectObject(src,a);SelectObject(dst,b);
                                 }
-                                if(small)DeleteObject(small);
+                                if(reduced_bitmap)DeleteObject(reduced_bitmap);
                                 if(src)DeleteDC(src);
                                 if(dst)DeleteDC(dst);
                                 if(screen)ReleaseDC(NULL,screen);
