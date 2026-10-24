@@ -127,7 +127,13 @@ def main(root):
             "LineTo(dc,x-3,y+22)" in cpp and
             "WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_CLIPCHILDREN" in cpp,
             "Classic reply connectors and scrollable nested cards missing")
-    results.append("Concept98: nested Win98 branch cards with inlined original RichEdit media")
+    require("concept98_branch_polish_v141" in cpp and
+            "concept98_full_photo_load_v101(&doc,&jpeg)" in cpp and
+            "insert_image(c.rich,NULL,small)" in cpp and
+            "snap.author" in cpp,
+            "Cached source photos and original sender names must be restored in nested branch")
+    results.append("Concept98: nested Win98 reply branches, sender labels, RTF/OLE and cached photo")
+
 
 
 
