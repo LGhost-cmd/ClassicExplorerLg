@@ -140,6 +140,7 @@ v129 = Path(__file__).resolve().with_name("patch_concept98_nickname_hit_v129.py"
 v130 = Path(__file__).resolve().with_name("patch_concept98_forward_view_v130.py")
 v131 = Path(__file__).resolve().with_name("patch_concept98_album_grid_v131.py")
 v132 = Path(__file__).resolve().with_name("patch_concept98_single_flow_reply_v132.py")
+v134 = Path(__file__).resolve().with_name("patch_concept98_reply_links_v134.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -205,6 +206,7 @@ for label, path in (
     ("v13.0", v130),
     ("v13.1", v131),
     ("v13.2", v132),
+    ("v13.4", v134),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -633,6 +635,7 @@ _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_forward_view_v130.py")),str(root)])
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_album_grid_v131.py")),str(root)])
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_single_flow_reply_v132.py")),str(root)])
+_chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_reply_links_v134.py")),str(root)])
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
