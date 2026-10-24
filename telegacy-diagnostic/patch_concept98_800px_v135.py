@@ -73,9 +73,8 @@ r'''            // Preserve the original for explicit double-click. Preview
                      document.photo_size,size_main);''',"choose preview only")
 # Set newly introduced fields on all other documents, and preserve them across
 # existing copy/move of Document structs. This avoids junk in non-photo media.
-one(m,"""Document document={0};""",
-"""Document document={0}; // v13.5 initializes original PhotoSize fields""",
-"safe Document initializer")
+if "Document document={0};" not in src[m]:
+    raise SystemExit("v13.5 requires zero-initialized media Document")
 # Request the true original when the user explicitly double clicks, including
 # after automatic smaller-size preview was cached.
 defn="static bool media_chat_full_photo_user_action(\n    Document* document,\n    bool save_and_open\n) {"
@@ -94,7 +93,7 @@ one(t,"""    if (same_active) {
     }
     if (same_active) {
         if (save_and_open)""","upgrade medium in progress")
-one(t,"""    bool started=media_chat_full_photo_begin(
+one(t,"""    bool started = media_chat_full_photo_begin(
         document,
         preferred
     );""",
