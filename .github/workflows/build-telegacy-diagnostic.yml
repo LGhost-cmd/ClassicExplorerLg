@@ -130,6 +130,12 @@ jobs:
         run: |
           python "telegacy-diagnostic\patch_chat_media_layout.py" "telegacy-src"
 
+      - name: Install complete Concept98 patch chain
+        shell: pwsh
+        run: |
+          python "telegacy-diagnostic\patch_chat_media_autoload_v65.py" "telegacy-src"
+          if ($LASTEXITCODE -ne 0) { throw "Concept98 patch chain preparation failed" }
+
       - name: Load full-quality chat photos and enforce block layout
         shell: pwsh
         run: |
