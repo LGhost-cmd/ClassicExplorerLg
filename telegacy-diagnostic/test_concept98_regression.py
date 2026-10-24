@@ -172,7 +172,7 @@ def main(root):
     results.append("UI: real global search, resizing, controls, menu, keyboard")
 
     for idx,msg in enumerate(results,1):
-        print(f"OK {idx}/5: {msg}")
+        print(f"OK {idx}/{len(results)}: {msg}")
     print("PASS: offline Concept 98 source-level regression contracts.")
     print("NOTE: live Telegram session / Windows visual runtime are NOT covered.")
 
