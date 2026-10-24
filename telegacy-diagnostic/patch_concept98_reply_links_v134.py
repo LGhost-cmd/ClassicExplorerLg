@@ -148,17 +148,30 @@ static bool concept98_reply_hit_v132(const ENLINK* event){
 // WndProcChat handler can consume its WM_LBUTTONDOWN.
 bool concept98_reply_click_v134(POINT point){
     if(!concept98_enabled || !chat || !current_peer)return false;
+    POINTL char_point={point.x,point.y};
+    const int clicked=(int)SendMessageW(chat,EM_CHARFROMPOS,0,(LPARAM)&char_point);
     for(size_t i=0;i<messages.size();i++){
+        // RichEdit character hit can be off by one on legacy builds.
+        // Skip other messages before asking the control for their text.
+        if(clicked<messages[i].start_char-2 ||
+           clicked>messages[i].end_header+2)continue;
         for(int type=0;type<2;type++){
             const wchar_t* tag=type==0?concept98_reply_tag_v134:
                                          concept98_forward_tag_v134;
             int a=0,b=0;
             if(!concept98_context_label_range_v134(messages[i],tag,&a,&b))
                 continue;
-            POINTL start={0},stop={0};
+            POINTL start={0},stop={0},last={0};
             SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&start,(LPARAM)a);
             SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&stop,(LPARAM)b);
-            if(start.y!=stop.y || stop.x<=start.x)continue;
+            if(start.y!=stop.y){
+                // At an explicit newline EM_POSFROMCHAR(b) can refer
+                // to the following line. Use the last glyph instead.
+                SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&last,(LPARAM)(b-1));
+                if(start.y!=last.y)continue;
+                stop.x=last.x+10;stop.y=last.y;
+            }
+            if(stop.x<=start.x)continue;
             HDC dc=GetDC(chat);
             int h=19;
             if(dc){
