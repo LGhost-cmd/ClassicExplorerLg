@@ -73,7 +73,7 @@ r'''            // Preserve the original for explicit double-click. Preview
                      document.photo_size,size_main);''',"choose preview only")
 # Set newly introduced fields on all other documents, and preserve them across
 # existing copy/move of Document structs. This avoids junk in non-photo media.
-if "Document document={0};" not in src[m]:
+if "Document document = {};" not in src[m]:
     raise SystemExit("v13.5 requires zero-initialized media Document")
 # Request the true original when the user explicitly double clicks, including
 # after automatic smaller-size preview was cached.
