@@ -111,7 +111,10 @@ def main(root):
     require("concept98_progressive_v137" in cpp and
             'concept98_page_unveil_v124("progressive text-first")' in cpp,
             "Chat text must not wait for the full-page photo veil")
-    results.append("Concept98: 800px Telegram preview, nested reply chains and progressive text")
+    require("concept98_chain_files_v138" in cpp and
+            "concept98_forward_paths_v130.push_back(path)" in cpp,
+            "Reply chain attachment list must match loaded source documents")
+    results.append("Concept98: 800px Telegram preview, reply chains, local files and progressive text")
 
 
 
