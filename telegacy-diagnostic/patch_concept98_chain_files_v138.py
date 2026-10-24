@@ -39,7 +39,7 @@ r'''        const Concept98ReplySnapshot136& node=it->second;
                 if(doc.min<row.start_char || doc.max>row.end_char)
                     continue;
                 std::wstring file_name=doc.filename?
-                    doc.filename:L"Вложение";
+                    doc.filename:L"\u0412\u043b\u043e\u0436\u0435\u043d\u0438\u0435";
                 std::wstring line;
                 for(int d=0;d<depth;d++)line+=L"  ";
                 wchar_t item_id[32]={0};
@@ -64,7 +64,7 @@ one('''    SendMessageW(concept98_forward_rich_v130,WM_SETTEXT,0,
 '''    if(concept98_forward_files_v130 &&
        concept98_forward_paths_v130.empty())
         SendMessageW(concept98_forward_files_v130,LB_ADDSTRING,0,
-            (LPARAM)L"Нет загруженных вложений");
+            (LPARAM)L"\u041d\u0435\u0442 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u044b\u0445 \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0439");
     SendMessageW(concept98_forward_rich_v130,WM_SETTEXT,0,
                  (LPARAM)content.c_str());''',"empty list")
 p.write_text(s,encoding="latin-1",newline="\r\n")
