@@ -132,7 +132,17 @@ def main(root):
             "insert_image(c.rich,NULL,reduced_bitmap)" in cpp and
             "snap.author" in cpp,
             "Cached source photos and original sender names must be restored in nested branch")
-    results.append("Concept98: nested Win98 reply branches, sender labels, RTF/OLE and cached photo")
+    require("concept98_reply_finish_v142" in message and
+            "EM_FINDTEXTEXW" in message and
+            "link_v142.chrgText.cpMin" in message,
+            "Reply text links must cover the full label from its exact first letter")
+    require("concept98_branch_strip_reply_v142" in cpp and
+            "if(copied)" in cpp and
+            "concept98_branch_strip_reply_v142(c.rich,*row)" in cpp and
+            "EM_EXSETSEL,0,(LPARAM)&cut" in cpp,
+            "Reply link heading must be stripped only from expanded RTF copies")
+    results.append("Concept98: full reply link and uncluttered nested conversation")
+
 
 
 
