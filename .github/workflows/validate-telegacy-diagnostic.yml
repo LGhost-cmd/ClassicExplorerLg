@@ -130,6 +130,7 @@ jobs:
             "patch_profiles_navigation.py",
             "patch_chat_video_reactions.py",
             "patch_chat_media_layout.py",
+            "patch_chat_media_autoload_v65.py",
             "patch_chat_media_layout_v64.py"
           )
           foreach ($patch in $patches) {
