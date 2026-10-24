@@ -117,7 +117,18 @@ def main(root):
     require("concept98_forward_chain_v139" in cpp and
             "Цитата: " not in cpp,
             "Forward chain must retain escaped native C++ source and inline quote")
-    results.append("Concept98: 800px preview, progressive loading and forward/reply chains")
+    require("concept98_nested_cards_v140" in cpp and
+            "concept98_branch_render_v140" in cpp and
+            "concept98_branch_copy_rtf_v140" in cpp and
+            "SendMessageW(destination,EM_STREAMIN,SF_RTF" in cpp and
+            "concept98_reply_request_v136(id)" in cpp,
+            "All nested messages must render actual RTF/OLE from loaded messages, fetching missing sources")
+    require("concept98_branch_proc_v140" in cpp and
+            "LineTo(dc,x-3,y+22)" in cpp and
+            "WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_CLIPCHILDREN" in cpp,
+            "Classic reply connectors and scrollable nested cards missing")
+    results.append("Concept98: nested Win98 branch cards with inlined original RichEdit media")
+
 
 
 
