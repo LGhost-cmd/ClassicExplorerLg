@@ -80,8 +80,8 @@ if start<0 or end<=start:
     raise SystemExit("v13.4 could not find v13.2 reply handler boundaries")
 new_handler=r'''// concept98_reply_links_v134: compare the visible label glyph bounds, never
 // the entire header, whitespace, media box or sender nickname.
-static bool concept98_reply_label_range_v134(
-    const Message& row,int* first,int* last)
+static bool concept98_context_label_range_v134(
+    const Message& row,const wchar_t* label,int* first,int* last)
 {
     if(row.end_header<=row.start_char)return false;
     const int size=row.end_header-row.start_char;
@@ -93,14 +93,16 @@ static bool concept98_reply_label_range_v134(
     tr.lpstrText=&body[0];
     LRESULT copied=SendMessageW(chat,EM_GETTEXTRANGE,0,(LPARAM)&tr);
     if(copied<=0 || copied>size)return false;
-    const wchar_t* label=
-        L"\x041e\x0442\x0432\x0435\x0442 \x043d\x0430 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435";
     const wchar_t* located=wcsstr(&body[0],label);
     if(!located)return false;
     *first=row.start_char+(int)(located-&body[0]);
     *last=*first+(int)wcslen(label);
     return *first>=row.start_char && *last<=row.end_header;
 }
+static const wchar_t* concept98_reply_tag_v134=
+    L"\x041e\x0442\x0432\x0435\x0442 \x043d\x0430 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435";
+static const wchar_t* concept98_forward_tag_v134=
+    L"\x041f\x0435\x0440\x0435\x0441\x043b\x0430\x043d\x043d\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435";
 static bool concept98_reply_activate_v134(size_t index){
     if(!current_peer || index>=messages.size())return false;
     const int target=messages[index].concept98_reply_target_v134;
@@ -134,7 +136,7 @@ static bool concept98_reply_hit_v132(const ENLINK* event){
     if(!concept98_enabled || !event || !chat)return false;
     for(size_t i=0;i<messages.size();i++){
         int a=0,b=0;
-        if(!concept98_reply_label_range_v134(messages[i],&a,&b))continue;
+        if(!concept98_context_label_range_v134(messages[i],concept98_reply_tag_v134,&a,&b))continue;
         if(event->chrg.cpMin>=a && event->chrg.cpMin<b &&
            event->chrg.cpMax<=b+1)
             return concept98_reply_activate_v134(i);
@@ -147,27 +149,32 @@ static bool concept98_reply_hit_v132(const ENLINK* event){
 bool concept98_reply_click_v134(POINT point){
     if(!concept98_enabled || !chat || !current_peer)return false;
     for(size_t i=0;i<messages.size();i++){
-        int a=0,b=0;
-        if(!concept98_reply_label_range_v134(messages[i],&a,&b))continue;
-        POINTL start={0},stop={0};
-        SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&start,(LPARAM)a);
-        SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&stop,(LPARAM)(b-1));
-        if(start.y!=stop.y)continue; // never hit a neighbouring line
-        HDC dc=GetDC(chat);
-        int h=19;
-        if(dc){
-            HGDIOBJ old=SelectObject(dc,hFonts[0]);
-            TEXTMETRICW tm={0};
-            if(GetTextMetricsW(dc,&tm))h=tm.tmHeight+tm.tmExternalLeading;
-            SelectObject(dc,old);
-            ReleaseDC(chat,dc);
+        for(int type=0;type<2;type++){
+            const wchar_t* tag=type==0?concept98_reply_tag_v134:
+                                         concept98_forward_tag_v134;
+            int a=0,b=0;
+            if(!concept98_context_label_range_v134(messages[i],tag,&a,&b))
+                continue;
+            POINTL start={0},stop={0};
+            SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&start,(LPARAM)a);
+            SendMessageW(chat,EM_POSFROMCHAR,(WPARAM)&stop,(LPARAM)b);
+            if(start.y!=stop.y || stop.x<=start.x)continue;
+            HDC dc=GetDC(chat);
+            int h=19;
+            if(dc){
+                HGDIOBJ old=SelectObject(dc,hFonts[0]);
+                TEXTMETRICW tm={0};
+                if(GetTextMetricsW(dc,&tm))h=tm.tmHeight+tm.tmExternalLeading;
+                SelectObject(dc,old);
+                ReleaseDC(chat,dc);
+            }
+            // Only the actual glyph run, not the remainder of the line.
+            if(point.x<(int)start.x || point.y<(int)start.y ||
+               point.x>=(int)stop.x || point.y>=(int)start.y+h)
+                continue;
+            if(type==0)return concept98_reply_activate_v134(i);
+            return concept98_open_forward_v130((int)i,false);
         }
-        // Reject pixels outside the glyph run. RichEdit can snap a blank
-        // point to the nearest character, so char index alone is unsafe.
-        if(point.x<(int)start.x-1 || point.y<(int)start.y-1 ||
-           point.x>(int)stop.x+15 || point.y>(int)start.y+h+1)
-            continue;
-        return concept98_reply_activate_v134(i);
     }
     return false;
 }
