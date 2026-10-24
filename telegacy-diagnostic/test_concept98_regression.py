@@ -68,6 +68,26 @@ def main(root):
     require("WebPFree(owned_rgba)" not in response,
             "Double-free reintroduced in WebP decoding")
     message=(root/"src"/"message.cpp").read_text(encoding="latin-1")
+    # Concept98 chat layout/interaction guards (applied after v13.2).
+    require("concept98_author_id_v132" in header and
+            "memcpy(&identity_v132,id_bytes_v132,8)" in message and
+            "messages.front().concept98_author_id_v132" in message and
+            "messages.back().concept98_author_id_v132" in message,
+            "Speaker gaps must distinguish group participants, not just outgoing flags")
+    require("pf.wAlignment=service?PFA_CENTER:PFA_LEFT" in message and
+            "author_changed_v132?150" in message,
+            "Traditional single-column chat with speaker transitions missing")
+    require("concept98_reply_hit_v132" in cpp and
+            "concept98_forward_hit_v130(pENLink)" in cpp and
+            "concept98_open_forward_v130((int)j,true)" in cpp,
+            "Reply and forward links must use the actual EN_LINK dispatcher and viewer")
+    require("SetWindowTextW(concept98_forward_win_v130,reply_view_v132?" in cpp,
+            "Reply popup must be labeled as reply, not forwarded message")
+    require("concept98_nickname_hit_v129" in
+            (root/"src"/"procs.cpp").read_text(encoding="latin-1"),
+            "Nickname-only profile click boundary missing")
+    results.append("Concept98: per-sender gaps, reply/forward click, popup title")
+
     require("concept98_clean_media_v105" in message,
             "Clean full-quality chat photo policy missing")
     require("if (size == 'i' && IMAGELOADPOLICY)" not in message,
