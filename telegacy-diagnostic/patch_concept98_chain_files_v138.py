@@ -61,7 +61,7 @@ r'''        const Concept98ReplySnapshot136& node=it->second;
 # Keep graceful empty list after a freshly fetched plain-text source.
 one('''    SendMessageW(concept98_forward_rich_v130,WM_SETTEXT,0,
                  (LPARAM)content.c_str());''',
-'''    if(concept98_forward_files_v130 &&
+r'''    if(concept98_forward_files_v130 &&
        concept98_forward_paths_v130.empty())
         SendMessageW(concept98_forward_files_v130,LB_ADDSTRING,0,
             (LPARAM)L"\u041d\u0435\u0442 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u043d\u044b\u0445 \u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0439");
