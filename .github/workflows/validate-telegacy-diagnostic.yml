@@ -107,6 +107,8 @@ jobs:
           python -m py_compile "telegacy-diagnostic\patch_concept98_album_grid_v131.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_single_flow_reply_v132.py"
           python -m py_compile "telegacy-diagnostic\patch_concept98_reply_links_v134.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_800px_v135.py"
+          python -m py_compile "telegacy-diagnostic\patch_concept98_reply_chain_v136.py"
           python -m py_compile "telegacy-diagnostic\test_concept98_regression.py"
 
       - name: Apply complete diagnostic patch chain
@@ -327,6 +329,8 @@ jobs:
           if ($message -notmatch "concept98_single_flow_reply_v132") { throw "v13.2 one-column text and reply links absent" }
           if ($runtime -notmatch "concept98_reply_hit_v132") { throw "v13.2 click-to-open reply source absent" }
           if ($message -notmatch "concept98_reply_links_v134" -or $runtime -notmatch "concept98_reply_click_v134") { throw "v13.4 durable reply references or click handler missing" }
+          if ($message -notmatch "concept98_preview_size_v135" -or $runtime -notmatch "concept98_original_photo_size_v135") { throw "v13.5 800px preview and original missing" }
+          if ($message -notmatch "concept98_reply_chain_v136" -or $runtime -notmatch "concept98_reply_refresh_v136") { throw "v13.6 reply chain missing" }
           if ($runtime -notmatch "concept98_drag_relayout_v128") { throw "v12.8 drag layout missing" }
           if ($procs -notmatch "concept98_drag_relayout_v128") { throw "v12.8 splitter drag missing" }
           if ($runtime -notmatch "concept98_readable_ui_v127") { throw "v12.7 close process guard missing" }
