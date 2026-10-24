@@ -77,6 +77,15 @@ def main(root):
     require("pf.wAlignment=service?PFA_CENTER:PFA_LEFT" in message and
             "author_changed_v132?150" in message,
             "Traditional single-column chat with speaker transitions missing")
+    require("concept98_reply_target_v134" in header and
+            "message.concept98_reply_target_v134" in message and
+            "concept98_reply_click_v134" in cpp and
+            "concept98_reply_activate_v134" in cpp and
+            "concept98_reply_links_v134" in message,
+            "Reply ID must survive ephemeral reply_needed and have direct mouse hit test")
+    require("concept98_reply_click_v134(pt)" in
+            (root/"src"/"procs.cpp").read_text(encoding="latin-1"),
+            "WndProcChat fails to handle reply link when EN_LINK is missing")
     require("concept98_reply_hit_v132" in cpp and
             "concept98_forward_hit_v130(pENLink)" in cpp and
             "concept98_open_forward_v130((int)j,true)" in cpp,
