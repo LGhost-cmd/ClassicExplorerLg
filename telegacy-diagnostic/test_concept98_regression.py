@@ -108,7 +108,11 @@ def main(root):
     require("message.reply_needed = concept98_enabled ? 0" in message and
             "if(concept98_enabled) { neworrep=true; break; }" in response,
             "Native reply loading must not rewrite chat RichEdit footer")
-    results.append("Concept98: 800px Telegram preview and nested reply chain")
+    require("concept98_progressive_v137" in cpp and
+            'concept98_page_unveil_v124("progressive text-first")' in cpp,
+            "Chat text must not wait for the full-page photo veil")
+    results.append("Concept98: 800px Telegram preview, nested reply chains and progressive text")
+
 
 
     require("concept98_clean_media_v105" in message,
