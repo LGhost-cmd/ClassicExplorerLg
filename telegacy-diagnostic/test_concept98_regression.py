@@ -114,7 +114,10 @@ def main(root):
     require("concept98_chain_files_v138" in cpp and
             "concept98_forward_paths_v130.push_back(path)" in cpp,
             "Reply chain attachment list must match loaded source documents")
-    results.append("Concept98: 800px Telegram preview, reply chains, local files and progressive text")
+    require("concept98_forward_chain_v139" in cpp and
+            "Цитата: " not in cpp,
+            "Forward chain must retain escaped native C++ source and inline quote")
+    results.append("Concept98: 800px preview, progressive loading and forward/reply chains")
 
 
 
