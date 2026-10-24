@@ -32,9 +32,9 @@ one('''            return concept98_open_forward_v130((int)i);
     return false;
 }''',
 "EN_LINK forward click")
-one('''            content+=L"Загрузка из Telegram...";
+one('''            content+=L"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0438\u0437 Telegram...";
             concept98_reply_request_v136(id);''',
-r'''            content+=L"Загрузка из Telegram...";
+r'''            content+=L"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0438\u0437 Telegram...";
             // Keep Telegram's embedded text quote visible until a full
             // messages.getMessages result arrives. Do not fake attachments.
             for(size_t j=0;j<messages.size();j++){
@@ -42,7 +42,7 @@ r'''            content+=L"Загрузка из Telegram...";
                    !messages[j].concept98_reply_quote_v134.empty()){
                     content+=L"\r\n";
                     for(int k=0;k<depth;k++)content+=L"    ";
-                    content+=L"Цитата: ";
+                    content+=L"\u0426\u0438\u0442\u0430\u0442\u0430: ";
                     content+=messages[j].concept98_reply_quote_v134;
                     break;
                 }
