@@ -96,6 +96,20 @@ def main(root):
             (root/"src"/"procs.cpp").read_text(encoding="latin-1"),
             "Nickname-only profile click boundary missing")
     results.append("Concept98: per-sender gaps, reply/forward click, popup title")
+    require("concept98_preview_size_v135" in message and
+            "concept98_original_photo_size_v135" in header and
+            "original_v135?&exact_v135:document" in cpp,
+            "Preview must use bounded Telegram PhotoSize while retaining explicit original")
+    require("concept98_reply_chain_v136" in message and
+            "concept98_reply_capture_rpc_v136" in response and
+            "concept98_reply_request_v136" in cpp and
+            "concept98_reply_refresh_v136" in cpp,
+            "Reply chain requires on-demand RPC fetch and display")
+    require("message.reply_needed = concept98_enabled ? 0" in message and
+            "if(concept98_enabled) { neworrep=true; break; }" in response,
+            "Native reply loading must not rewrite chat RichEdit footer")
+    results.append("Concept98: 800px Telegram preview and nested reply chain")
+
 
     require("concept98_clean_media_v105" in message,
             "Clean full-quality chat photo policy missing")
