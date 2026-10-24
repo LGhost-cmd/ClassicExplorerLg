@@ -42,7 +42,9 @@ r'''        const Concept98ReplySnapshot136& node=it->second;
                     doc.filename:L"Вложение";
                 std::wstring line;
                 for(int d=0;d<depth;d++)line+=L"  ";
-                line+=L"[#";line+=number;line+=L"] ";
+                wchar_t item_id[32]={0};
+                swprintf_s(item_id,ARRAYSIZE(item_id),L"%d",id);
+                line+=L"[#";line+=item_id;line+=L"] ";
                 line+=file_name;
                 if(concept98_forward_files_v130)
                     SendMessageW(concept98_forward_files_v130,
