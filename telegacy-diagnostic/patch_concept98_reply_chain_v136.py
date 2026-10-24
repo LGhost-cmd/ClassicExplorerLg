@@ -173,29 +173,29 @@ static void concept98_reply_refresh_v136(){
     int id=concept98_reply_root_v136;
     for(int depth=0;id>0 && depth<12;depth++){
         if(!visited.insert(id).second){
-            content+=L"\r\n[Циклическая ссылка на сообщение]\r\n";
+            content+=L"\r\n[\u0426\u0438\u043a\u043b\u0438\u0447\u0435\u0441\u043a\u0430\u044f \u0441\u0441\u044b\u043b\u043a\u0430 \u043d\u0430 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435]\r\n";
             break;
         }
         if(depth)content+=L"\r\n";
         for(int i=0;i<depth;i++)content+=L"    ";
         if(depth)content+=L"[ ";
         wchar_t number[44]={0};
-        swprintf_s(number,ARRAYSIZE(number),L"Сообщение #%d",id);
+        swprintf_s(number,ARRAYSIZE(number),L"\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 #%d",id);
         content+=number;
         content+=L"\r\n";
         std::map<int,Concept98ReplySnapshot136>::iterator it=
             concept98_reply_nodes_v136.find(id);
         if(it==concept98_reply_nodes_v136.end()){
             for(int i=0;i<depth;i++)content+=L"    ";
-            content+=L"Загрузка из Telegram...";
+            content+=L"\u0417\u0430\u0433\u0440\u0443\u0437\u043a\u0430 \u0438\u0437 Telegram...";
             concept98_reply_request_v136(id);
             if(depth)content+=L" ]\r\n";
             break;
         }
         const Concept98ReplySnapshot136& node=it->second;
         for(int i=0;i<depth;i++)content+=L"    ";
-        content+=node.body.empty()?L"[Сообщение без текста]":node.body;
-        if(node.media)content+=L"\r\n[Медиавложение]";
+        content+=node.body.empty()?L"[\u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0435 \u0431\u0435\u0437 \u0442\u0435\u043a\u0441\u0442\u0430]":node.body;
+        if(node.media)content+=L"\r\n[\u041c\u0435\u0434\u0438\u0430\u0432\u043b\u043e\u0436\u0435\u043d\u0438\u0435]";
         if(depth)content+=L" ]";
         id=node.parent;
         if(content.size()>32000){content.resize(32000);break;}
@@ -204,7 +204,7 @@ static void concept98_reply_refresh_v136(){
                  (LPARAM)content.c_str());
     SendMessageW(concept98_forward_rich_v130,EM_SETSEL,0,0);
     SetWindowTextW(concept98_forward_win_v130,
-        L"Цепочка ответов | Telegacy");
+        L"\u0426\u0435\u043f\u043e\u0447\u043a\u0430 \u043e\u0442\u0432\u0435\u0442\u043e\u0432 | Telegacy");
 }
 static bool concept98_reply_chain_open_v136(size_t index){
     if(!concept98_reply_peer_check_v136() || index>=messages.size())
