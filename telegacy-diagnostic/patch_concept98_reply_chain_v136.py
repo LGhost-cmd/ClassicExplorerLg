@@ -23,7 +23,7 @@ one(m,"message.reply_needed = context_v128.empty()?0:reply_target_v128;",
 "disable legacy footer updates")
 # Cache the text while decoding legitimate messages normally. No raw pointer
 # escapes, and only a short bounded excerpt enters the chain cache.
-one(m,"    message.seen = ((to_front && !message.outgoing)",
+one(m,"message.seen = ((to_front && !message.outgoing)",
 r'''    if(concept98_enabled && message.id>0 && msg_bytes){
         const int length_v136=tlstr_to_str_len(msg_bytes);
         if(length_v136>=0 && length_v136<=4096){
