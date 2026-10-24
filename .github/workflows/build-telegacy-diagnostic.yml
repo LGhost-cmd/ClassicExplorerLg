@@ -225,21 +225,26 @@ jobs:
             } |
             Select-Object -First 1
 
-          if (-not $categories) {
-            throw "emoji_categories.dat was not found in official Telegacy setup"
+          # The upstream v1.0.4 self-extracting installer does not always
+          # expose per-user emoji databases when unpacked by 7-Zip.
+          # These are optional runtime UI resources: never make a compiled
+          # Telegacy executable fail packaging because the setup lacks them.
+          if ($categories) {
+            Copy-Item $categories.FullName "artifact\\emoji_categories.dat" -Force
+          } else {
+            Write-Warning "The upstream installer contains no emoji_categories.dat; using runtime fallback."
+          }
+          if ($shortcodes) {
+            Copy-Item $shortcodes.FullName "artifact\\emoji_shortcodes.ini" -Force
+          } else {
+            Write-Warning "The upstream installer contains no emoji_shortcodes.ini; using runtime fallback."
+          }
+          if ($emojiDir) {
+            Copy-Item $emojiDir.FullName "artifact\\emojis" -Recurse -Force
+          } else {
+            Write-Warning "The upstream installer contains no emojis icons; using bundled icons98."
           }
 
-          if (-not $shortcodes) {
-            throw "emoji_shortcodes.ini was not found in official Telegacy setup"
-          }
-
-          if (-not $emojiDir) {
-            throw "emojis directory was not found in official Telegacy setup"
-          }
-
-          Copy-Item $categories.FullName "artifact\emoji_categories.dat" -Force
-          Copy-Item $shortcodes.FullName "artifact\emoji_shortcodes.ini" -Force
-          Copy-Item $emojiDir.FullName "artifact\emojis" -Recurse -Force
           Copy-Item "telegacy-src\src\message.cpp" artifact\message-diag.cpp -Force
 
           @"
