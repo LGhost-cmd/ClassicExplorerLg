@@ -148,6 +148,7 @@ v138 = Path(__file__).resolve().with_name("patch_concept98_chain_files_v138.py")
 v139 = Path(__file__).resolve().with_name("patch_concept98_forward_chain_v139.py")
 v140 = Path(__file__).resolve().with_name("patch_concept98_nested_cards_v140.py")
 v141 = Path(__file__).resolve().with_name("patch_concept98_branch_polish_v141.py")
+v142 = Path(__file__).resolve().with_name("patch_concept98_reply_finish_v142.py")
 for label, path in (
     ("v6.4", v64),
     ("v6.6", v66),
@@ -221,6 +222,7 @@ for label, path in (
     ("v13.9", v139),
     ("v14.0", v140),
     ("v14.1", v141),
+    ("v14.2", v142),
 ):
     if not path.exists():
         raise SystemExit(f"Missing {label} patch: {path}")
@@ -657,6 +659,7 @@ _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_forward_chain_v139.py")),str(root)])
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_nested_cards_v140.py")),str(root)])
 _chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_branch_polish_v141.py")),str(root)])
+_chat_media_v66_subprocess.check_call([sys.executable,str(Path(__file__).resolve().with_name("patch_concept98_reply_finish_v142.py")),str(root)])
 '''
     v64.write_text(v64_text, encoding="utf-8", newline="\n")
 
