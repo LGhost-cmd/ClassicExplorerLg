@@ -18,6 +18,29 @@ def once(v,old,new,label):
  n=v.count(old)
  if n!=1:raise SystemExit("v13.2 "+label+" count="+str(n))
  return v.replace(old,new,1)
+# Record a stable sender identity, not merely outgoing/incoming. Group
+# participants are separate speakers even when all their messages are inbound.
+header_path=root/"include"/"telegacy.h"
+header_source=header_path.read_text(encoding="latin-1")
+field_anchor="bool outgoing;\n\tbool seen;"
+if header_source.count(field_anchor)!=1:
+    raise SystemExit("v13.2 could not locate Message sender field")
+header_source=header_source.replace(
+    field_anchor,
+    "bool outgoing;\n\tunsigned __int64 concept98_author_id_v132;\n\tbool seen;",1)
+s=once(s,
+    "message.outgoing = (flags & (1 << 1)) != 0 || memcmp(current_peer->id, myself.id, 8) == 0;",
+    """message.outgoing = (flags & (1 << 1)) != 0 || memcmp(current_peer->id, myself.id, 8) == 0;
+    // concept98_author_id_v132: exact group sender when available.
+    unsigned __int64 identity_v132=0;
+    if(!message.outgoing){
+        const BYTE* id_bytes_v132=chat_member_id ? chat_member_id : current_peer->id;
+        memcpy(&identity_v132,id_bytes_v132,8);
+        if(!identity_v132)identity_v132=1;
+    }
+    message.concept98_author_id_v132=identity_v132;""",
+    "persist group sender identity")
+
 # Layout. Header and body are single-flow like ICQ/mIRC, author name colors
 # remain. The only larger vertical gap is between different speakers; for
 # historical pages compare to the neighbour in the correct prepend direction.
@@ -48,8 +71,9 @@ new='''    // concept98_single_flow_reply_v132: traditional single text column.
     pf.dwMask|=PFM_SPACEBEFORE|PFM_SPACEAFTER;
     const bool author_changed_v132=!service && header &&
         !messages.empty() &&
-        message.outgoing!=(to_front?messages.front().outgoing:
-                                    messages.back().outgoing);
+        message.concept98_author_id_v132 !=
+        (to_front?messages.front().concept98_author_id_v132:
+                  messages.back().concept98_author_id_v132);
     pf.dySpaceBefore=author_changed_v132?150:(!service&&header?35:0);
     pf.dySpaceAfter=0;'''
 s=once(s,old,new,"traditional left alignment")
@@ -147,7 +171,7 @@ static bool concept98_reply_hit_v132(const ENLINK* event){
         if(reply>0){
             for(size_t j=0;j<messages.size();j++){
                 if(messages[j].id==reply)
-                    return concept98_open_forward_v130((int)j);
+                    return concept98_open_forward_v130((int)j,true);
             }
             get_message(reply,current_peer);
             MessageBoxW(hMain,
@@ -171,6 +195,21 @@ u=once(u,
                (concept98_reply_hit_v132(pENLink) ||
                 concept98_forward_hit_v130(pENLink)))return 0;''',
 "link dispatch")
+# Native popup uses the same viewer, but the title reflects whether it displays
+# the quoted source of a reply or a forwarded message.
+u=once(u,
+    "static bool concept98_open_forward_v130(int index){",
+    "static bool concept98_open_forward_v130(int index,bool reply_view_v132=false){",
+    "viewer distinguishes reply from forward")
+u=once(u,
+    "    if(!concept98_forward_rich_v130)return false;",
+    r'''    if(concept98_forward_win_v130)
+        SetWindowTextW(concept98_forward_win_v130,reply_view_v132?
+            L"\x041e\x0442\x0432\x0435\x0442 \x043d\x0430 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 | Telegacy":
+            L"\x041f\x0435\x0440\x0435\x0441\x043b\x0430\x043d\x043d\x043e\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435 | Telegacy");
+    if(!concept98_forward_rich_v130)return false;''',
+    "viewer context title")
 m.write_text(s,encoding="latin-1",newline="\r\n")
 t.write_text(u,encoding="latin-1",newline="\r\n")
-print("v13.2: one left-aligned message flow; author-switch only spacing; uniform system-gray click-to-open reply/forward frames.")
+header_path.write_text(header_source,encoding="latin-1",newline="\r\n")
+print("v13.2: one left-aligned message flow; per-person speaker-switch spacing; uniform system-gray click-to-open reply/forward frames.")
