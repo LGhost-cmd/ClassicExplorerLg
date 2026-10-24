@@ -13,7 +13,7 @@ def one(a,b,why):
  n=s.count(a)
  if n!=1:raise SystemExit("v14.1 "+why+" count="+str(n))
  s=s.replace(a,b,1)
-one('''    std::wstring body;
+one(r'''    std::wstring body;
     bool media;
     Concept98ReplySnapshot136():parent(0),media(false){}''',
 '''    std::wstring body;
@@ -24,7 +24,7 @@ one('''    std::wstring body;
         memset(photo_id,0,sizeof(photo_id));
         memset(photo_hash,0,sizeof(photo_hash));
     }''',"message snapshot")
-one('''    concept98_reply_note_v136(id,parent,text,(flags&(1u<<9))!=0);
+one(r'''    concept98_reply_note_v136(id,parent,text,(flags&(1u<<9))!=0);
     free(text);''',
 r'''    concept98_reply_note_v136(id,parent,text,(flags&(1u<<9))!=0);
     Concept98ReplySnapshot136& snap=concept98_reply_nodes_v136[id];
@@ -53,10 +53,10 @@ r'''    concept98_reply_note_v136(id,parent,text,(flags&(1u<<9))!=0);
         }
     }
     free(text);''',"retain sender and photo reference")
-one('''        int content_height=has_media?310:115;''',
+one(r'''        int content_height=has_media?310:115;''',
 '''        // Compact text block; actual sticker/photo rows retain space for OLE.
         int content_height=has_media?264:75;''',"compact quotation")
-one('''        const wchar_t* heading=depth?
+one(r'''        const wchar_t* heading=depth?
             L"\x0412 \x043e\x0442\x0432\x0435\x0442 \x043d\x0430":
             L"\x0422\x0435\x043a\x0443\x0449\x0435\x0435 \x0441\x043e\x043e\x0431\x0449\x0435\x043d\x0438\x0435";
         HWND hTitle=CreateWindowExW(0,L"STATIC",heading,''',
@@ -70,7 +70,7 @@ r'''        std::wstring heading=depth?
         HWND hTitle=CreateWindowExW(0,L"STATIC",heading.c_str(),''',"author in heading")
 # Decoded JPEG cache is genuinely the source photo; never substitute an
 # unrelated placeholder or an image from a different ID.
-one('''            if(!copied){
+one(r'''            if(!copied){
                 std::wstring body;''',
 r'''            if(!copied){
                 bool cached_photo=false;
@@ -116,7 +116,7 @@ r'''            if(!copied){
                     }
                 }
                 std::wstring body;''',"restore cached source photo")
-one('''                    if(has_media){
+one(r'''                    if(has_media){
                         if(!body.empty())body+=L"\r\n";
                         body+=L"\x0412\x043b\x043e\x0436\x0435\x043d\x0438\x0435 \x043f\x043e\x043b\x0443\x0447\x0435\x043d\x043e \x0438\x0437 Telegram";
                     }''',
@@ -126,7 +126,7 @@ r'''                    if(has_media && !cached_photo){
                     }''',"honest media status")
 # The unescaped \\u marker above is raw literal C++ \\u0443, legal
 # only in standard universal character escapes; leave it intact.
-one('''                SendMessageW(c.rich,WM_SETTEXT,0,(LPARAM)body.c_str());''',
+one(r'''                SendMessageW(c.rich,WM_SETTEXT,0,(LPARAM)body.c_str());''',
 '''                if(cached_photo){
                     SendMessageW(c.rich,EM_SETSEL,0,0);
                     if(!body.empty()){
