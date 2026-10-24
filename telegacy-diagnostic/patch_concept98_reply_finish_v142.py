@@ -83,9 +83,13 @@ static void concept98_branch_strip_reply_v142(HWND destination,
            (next[0]==L'\r'||next[0]==L'\n'))
             ++cut.cpMax;
     }
+    // The branch RichEdit is read-only to users. Temporarily unlock it
+    // for this one internal edit, then restore its permanent read-only state.
+    SendMessageW(destination,EM_SETREADONLY,FALSE,0);
     SendMessageW(destination,EM_EXSETSEL,0,(LPARAM)&cut);
     SendMessageW(destination,EM_REPLACESEL,FALSE,(LPARAM)L"");
     SendMessageW(destination,EM_SETSEL,0,0);
+    SendMessageW(destination,EM_SETREADONLY,TRUE,0);
 }
 '''
 t=replace_exact(t,anchor,helper+anchor,"viewer-only label stripping helper")
